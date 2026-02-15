@@ -41,11 +41,7 @@ class TacticalOutfitter:
             # 🚀 救援重裝：高效率突擊
             "RESCUE_HEAVY_DESKTOP": {
                 "impersonate": "chrome120", 
-                "headers": {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                    "Accept": "*/*",
-                    "Connection": "keep-alive"
-                }, 
+                "headers": {}, 
                 "jitter": (1.0, 2.0)
             }
         }

@@ -159,15 +159,16 @@ class NetworkNavigator:
     def download_podcast(self, url, filename):
         r = None
         try:
-            # 非 RE 路徑執行擬態脈衝
+            # 只有非 RE 路徑才需要漫長暖身
             if self.path_id != "RE":
                 self.perform_mimicry_pulse(mode="heavy")
                 self._perform_mimic_knock(url)
-
-            print(f"📡 [發起任務] 目標網址: {url} (採用路徑: {self.path_id})")
             
-            # 💡 標頭已經在 __init__ 時透過 self.session.headers.update() 注入了
-            # 所以這裡不需要再額外傳入 headers 參數
+            print(f"📡 [發起任務] 目標網址: {url} (路徑: {self.path_id})")
+            
+            # 💡 [關鍵修正]：不再手動定義 headers_to_use。
+            # 標準路徑會使用 __init__ 時注入的 Session Headers。
+            # RE 路徑則會因為 Outfitter 給的是空字典，而發出最純淨的請求。 [cite: 2026-02-15]
             r = self.session.get(url, stream=True, timeout=300, 
                                  allow_redirects=True, verify=False)
             r.raise_for_status()
@@ -182,6 +183,7 @@ class NetworkNavigator:
             return False
         finally:
             if r: r.close()
+# -----(定位線)下載邏輯修正完成-----
 
 
     # 🔥 [進化戰技] 幽靈取證：403 熔斷與長延遲試探  
