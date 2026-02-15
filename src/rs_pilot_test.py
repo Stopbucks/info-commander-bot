@@ -5,35 +5,46 @@
 import os
 import requests
 
-def run_simple_rs():
-    # 1. 領取裝備 (API KEY)
+def run_podcast_rs():
+    # 1. 領取金鑰
     api_key = os.environ.get('SCRAP_API_KEY', '').strip()
     if not api_key:
-        print("❌ [RS] 找不到 API KEY，請檢查 GitHub Secrets。")
+        print("❌ [RS] 找不到 API KEY。")
         return
 
-    # 2. 封裝最標準的代理地址
+    # 2. 建立 8001 通道 (剛才驗證成功的模式)
     proxy_url = f"http://scraperapi:{api_key}@proxy-server.scraperapi.com:8001"
     proxies = {"http": proxy_url, "https": proxy_url}
-
-    # 🎯 先測試 Google (極簡目標)，再測試 Archive (實戰目標)
-    test_url = "http://www.google.com" 
     
-    print(f"📡 [RS 低空偵察] 正在嘗試透過 8001 端口連線至: {test_url}")
+    # 🎯 實戰目標：Archive.org 音檔
+    target_url = "https://archive.org/download/OTRR_Sherlock_Holmes_Sir_Arthur_Conan_Doyle_Library/Sherlock_Holmes_480321_025_The_Case_of_the_Innocent_Murderess.mp3"
+    
+    print(f"🚀 [RS 實戰] 通道已確認，正在提取音檔樣本...")
 
     try:
-        # 💡 戰術核心：不自定義任何標頭，讓標準 requests 處理所有必要欄位
-        # 💡 使用 http (非 s) 測試，進一步降低握手失敗風險
-        resp = requests.get(test_url, proxies=proxies, timeout=30, verify=False)
-        
-        print(f"🚩 [偵察回報] 狀態碼: {resp.status_code}")
-        if resp.status_code == 200:
-            print("✅ [首戰大捷] 代理通道完全暢通！免費版支援此路徑。")
-        else:
-            print(f"⚠️ [連線成功但被擋] 伺服器回傳: {resp.text[:100]}")
+        # 💡 使用 stream=True 避免大檔案撐爆記憶體 [cite: 2026-02-15]
+        # 💡 verify=False 避免 GitHub 環境的憑證衝突
+        with requests.get(target_url, proxies=proxies, stream=True, timeout=60, verify=False) as r:
+            r.raise_for_status()
+            
+            save_path = "rs_final_test.mp3"
+            downloaded = 0
+            limit_size = 1.0 * 1024 * 1024  # 🚀 嚴格鎖定 1.0MB
+            
+            with open(save_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=16384): # 加大 chunk 提高傳輸效率
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        # 🛡️ 達成 1MB 即刻熔斷
+                        if downloaded >= limit_size:
+                            print(f"✅ [RS 大捷] 成功抓回樣本：{downloaded/(1024*1024):.2f} MB")
+                            break
+                            
+        print(f"🏁 任務成功完成，檔案路徑: {save_path}")
 
     except Exception as e:
-        print(f"💥 [偵察崩潰] 原因: {e}")
+        print(f"❌ [RS 失敗] 原因: {e}")
 
 if __name__ == "__main__":
-    run_simple_rs()
+    run_podcast_rs()
