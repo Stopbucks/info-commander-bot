@@ -1,0 +1,115 @@
+##########################################################################
+# 🏹 INFO COMMANDER 救援中心 v1.0 (深夜補檔版)
+##########################################################################
+# 1. 任務目標：專責處理  失敗任務或次新集 (Penultimate) 下載。
+# 2. 觸發機制：由 cron-job.org 於台北 03:00 (UTC 19:00) 觸發。
+##########################################################################
+
+name: Info Commander Rescue Task
+
+on:
+  # 🚀 外部 API 觸發點 (dispatch type: rescue_mission)
+  repository_dispatch:
+    types: [rescue_mission]
+
+  # 🛠️ 手動啟動救援程序
+  workflow_dispatch:
+
+jobs:
+  rescue_ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180  # 🚀 同樣給予 3 小時，確保長延遲下載不被中斷
+    
+    # ================= [救援中心：智慧分流區塊] =================
+
+    steps:
+    - name: 📦 檢出程式碼
+      uses: actions/checkout@v4
+
+    - name: 🐍 設定 Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    # 🚀 [核心手術]：改為小隊判定，救援日 (Index 5) 的 RE 路徑預設關閉 WARP
+    - name: 🔍 救援環境判定 (Rescue Triage)
+      id: triage
+      run: |
+        # 取得 UTC 19:00 (台北 03:00) 當時的星期索引
+        WEEK_INDEX=$(($(date -u +%u) - 1))
+        
+        # 讀取 JSON 配置
+        PATH_ID=$(jq -r ".squad_config[\"$WEEK_INDEX\"].path_id" config/podcast_tactics.json)
+        TEAM_NAME=$(jq -r ".squad_config[\"$WEEK_INDEX\"].team" config/podcast_tactics.json)
+        
+        echo "📅 救援任務索引: $WEEK_INDEX | 執行小隊: $TEAM_NAME | 路徑: $PATH_ID"
+
+        # 戰術邏輯：只有純 GitHub 直連 (D) 才需要 WARP。
+        # 救援兵 (RE) 與 Fly (A, C) 均不需 WARP，以避免與 GCP+WARP 特徵重疊 [cite: 2026-02-06]
+        if [[ "$PATH_ID" == "D" ]]; then
+          echo "NEED_WARP=true" >> $GITHUB_ENV
+          echo "🛡️ [判定] 偵測到直連路徑，啟動 WARP 隱身斗篷。"
+        else
+          echo "NEED_WARP=false" >> $GITHUB_ENV
+          echo "🎭 [判定] 偵測到專業代理路徑 ($PATH_ID)，跳過 WARP 以降低延遲。"
+        fi
+
+    - name: 🛡️ 部署 Cloudflare WARP 隱身斗篷
+      if: env.NEED_WARP == 'true'
+      uses: fscarmen/warp-on-actions@v1.1
+      with:
+        stack: nosh
+
+    - name: 🔌 等待 WARP 服務穩定
+      if: env.NEED_WARP == 'true'
+      run: |
+        echo "⏳ 正在為救援部隊預熱環境..."
+        sleep 10
+        sudo warp-cli --accept-tos status || (sudo systemctl restart warp-svc && sleep 5)
+
+    - name: ⚙️ 安裝救援環境與依賴
+      run: |
+        sudo apt-get update && sudo apt-get install -y ffmpeg
+        python -m pip install --upgrade pip
+        pip install --force-reinstall supabase curl_cffi>=0.7.0 requests[socks] feedparser google-generativeai groq PySocks sgmllib3k python-dotenv google-cloud-storage
+
+    - name: 🚀 執行任務 (Run Info Commander)
+      env:
+        # --- 核心 API 金鑰 ---
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        RENDER_WEBHOOK_URL: ${{ secrets.RENDER_WEBHOOK_URL }}
+        CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        
+        
+        # --- 🚀 GCP 雲端大腦金鑰 (用於同步 Cookies 與指紋庫) ---
+        GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+        
+        # 🔐 [核心密鑰] 補上缺失的 Supabase 鑰匙
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+        # --- 代理路徑安全變數 ---
+        VPS_PROXY_URL: ${{ secrets.VPS_PROXY_URL }}
+        PROXY_LIST: ${{ secrets.PROXY_LIST }}
+        GCP_PROXY_USER: ${{ secrets.GCP_PROXY_USER }}
+        GCP_PROXY_PASS: ${{ secrets.GCP_PROXY_PASS }}
+        GCP_PROXY_HOST: ${{ secrets.GCP_PROXY_HOST }}
+        GCP_PROXY_PORT: ${{ secrets.GCP_PROXY_PORT }}
+        
+        # 👇 [FLY 專用變數] --------------------------------
+        FLY_PROXY_JP: ${{ secrets.FLY_PROXY_JP }}
+        FLY_PROXY_LA: ${{ secrets.FLY_PROXY_LA }}
+        FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        
+        # --------------------------------------------------
+        # 🚀 救援小隊專用變數
+        #SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
+        WEBSHARE_LIST: ${{ secrets.WEBSHARE_LIST }} 
+        SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
+        PYTHONUNBUFFERED: 1
+      run: |
+        echo "🚀 救援小隊出勤時間: $(date -u)"
+        # 💡 執行我們新創立的救援腳本
+        python src/podcast_rescuer.py

@@ -1,0 +1,94 @@
+##########################################################################
+# 🧪 ScraperAPI 住宅代理：三大路徑壓力測試
+##########################################################################
+# 測試目標：
+# 1. Archive.org (大型檔案連線穩定性)
+# 2. NASA.gov (政府網域防火牆穿透)
+# 3. LibriVox (標準非營利伺服器)
+##########################################################################
+##########################################################################
+# 🧪 ScraperAPI 單點攻堅測試 v1.3
+##########################################################################
+# 目的：測試單一穩定網址，確認 HTTP/1.1 與標頭淨化是否根除 400 錯誤。
+##########################################################################
+
+name: 🧪 ScraperAPI Single Point Test
+
+on:
+  workflow_dispatch: # 手動啟動
+
+jobs:
+  single_target_test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 📦 檢出程式碼
+      uses: actions/checkout@v4
+
+    - name: 🐍 設定 Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: ⚙️ 安裝必要依賴
+      run: |
+        sudo apt-get update && sudo apt-get install -y ffmpeg
+        python -m pip install --upgrade pip
+        pip install "curl_cffi>=0.7.0" "requests[socks]" feedparser google-generativeai groq PySocks sgmllib3k python-dotenv google-cloud-storage supabase
+
+    - name: 🚀 執行 Archive.org 下載演習
+      env:
+        SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
+        PYTHONUNBUFFERED: 1
+      run: |
+        echo "💎 [單點攻堅啟動] 正在建立專用測試腳本..."
+        
+        # 🚀 腳本靠左對齊，解決 IndentationError
+        cat <<EOF > scraper_single_test.py
+        import os
+        import sys
+        import time
+        # 注入 src 搜尋路徑
+        sys.path.append(os.path.join(os.getcwd(), 'src'))
+        from podcast_navigator import NetworkNavigator
+
+        # 🎯 鎖定單一最穩目標：Internet Archive
+        target = {
+            "name": "Archive_Sherlock", 
+            "url": "https://archive.org/download/OTRR_Sherlock_Holmes_Sir_Arthur_Conan_Doyle_Library/Sherlock_Holmes_480321_025_The_Case_of_the_Innocent_Murderess.mp3"
+        }
+
+        mock_config = {
+            "squad_name": "Scraper_Single_Pilot",
+            "identity_hash": "smoke_test_001",
+            "path_id": "RE", # 🚀 必須為 RE 才能觸發您在 navigator.py 寫的降級邏輯
+            "transport_proxy": f"http://scraperapi:{os.environ.get('SCRAP_API_KEY')}@proxy-server.scraperapi.com:8001",
+            "curl_config": {"impersonate": "chrome124"}
+        }
+
+        print(f"🛠️ [環境準備] 開始對 {target['name']} 發起單點測試...")
+
+        try:
+            with NetworkNavigator(mock_config) as nav:
+                save_path = "test_single_output.mp3"
+                
+                # 1. 執行 RE 免檢放行
+                check = nav.run_pre_flight_check()
+                
+                # 2. 執行下載 (應觸發 HTTP/1.1 與 verify=False)
+                if check.get("status"):
+                    print(f"📡 運輸通道已開啟: {target['url']}")
+                    if nav.download_podcast(target['url'], save_path):
+                        size = os.path.getsize(save_path) / (1024*1024)
+                        print(f"✅ [測試大捷] 成功抓回音檔：{size:.2f} MB")
+                    else:
+                        print("❌ [運輸失敗] Navigator.download_podcast 回傳 False。")
+                else:
+                    print("❌ [連線阻塞] 代理伺服器握手失敗。")
+        except Exception as e:
+            print(f"💥 [程式崩潰] 錯誤原因: {str(e)}")
+
+        print("\n🏁 測試任務結束。")
+        EOF
+
+        python scraper_single_test.py

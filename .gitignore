@@ -1,0 +1,20 @@
+# --- 🔐 安全金鑰與環境變數 (核心防線) ---
+config/
+service-account.json
+.env
+
+# --- 📦 地端倉庫與數據 (禁止上傳) ---
+archive/
+node_modules/
+workspace/
+history_data/
+daily_checkpoint.json
+*.mp3
+*.txt
+*.json.info
+# --- 防堵所有備份檔與變體 ---
+*.bak
+daily_checkpoint.json*
+__pycache__/
+.venv/
+*.pyc

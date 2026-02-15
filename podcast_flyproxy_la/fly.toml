@@ -1,0 +1,37 @@
+# fly.toml app configuration file for podcast-flyproxy-la
+#
+# 美國洛杉磯 (LAX) 節點配置 - 開啟 TCP 直通模式
+#
+
+app = 'podcast-flyproxy-la'  # ✅ 確認這是美國隊的 App 名稱
+primary_region = 'lax'       # ✅ 確認地區是洛杉磯 (lax)
+
+[build]
+
+# ❌ 移除了原本的 [http_service] 懶人包
+# ✅ 改用下方的手動 [[services]] 設定
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  # 關鍵設定 1：Port 443 (HTTPS)
+  # handlers = ["tls"] 代表「只做 TLS 解密」，不做 HTTP 檢查 (TCP Passthrough)
+  [[services.ports]]
+    port = 443
+    handlers = ["tls"]
+
+  # 關鍵設定 2：Port 80 (HTTP)
+  # 強制跳轉到 HTTPS，確保連線安全
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+[[vm]]
+  memory = '1gb'
+  cpus = 1
+  memory_mb = 1024

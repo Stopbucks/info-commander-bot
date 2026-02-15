@@ -1,0 +1,31 @@
+{
+    "last_recon": {},
+    "domains": {
+        "id_c2655c60": {
+            "failures": [
+                {
+                    "timestamp": 1769607670.7387118,
+                    "code": 500,
+                    "weight": 0.2
+                },
+                {
+                    "timestamp": 1769607692.520277,
+                    "code": 500,
+                    "weight": 0.2
+                },
+                {
+                    "timestamp": 1769607698.03942,
+                    "code": 500,
+                    "weight": 0.2
+                },
+                {
+                    "timestamp": 1769607705.7838733,
+                    "code": 500,
+                    "weight": 0.2
+                }
+            ]
+        }
+    },
+    "burned_identities": {},
+    "global_failures": []
+}

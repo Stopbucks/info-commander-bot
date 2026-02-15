@@ -1,0 +1,152 @@
+##########################################################################
+# 🚀 INFO COMMANDER 指揮中心 v2.6 (外部精準觸發版)
+##########################################################################
+# 1. 指揮權限變更：
+#    - [移除] GitHub 內部 Schedule：避免排程延遲與重複執行衝突。
+#    - [啟用] 外部精準啟動：完全由 cron-job.org 透過 API 觸發。
+# 2. 行為特徵：
+#    - 啟動精準度：100% (由 cron-job.org 保證)。
+#    - 報到隨機性：由 Python 內部 Jitter 邏輯執行 (伺服器端看不到準點行為)。
+#    - 0231 由supabase擔任雲端發派節目更新
+##########################################################################
+
+name: Info Commander Podcast Sync
+
+on:
+  # 🚀 外部 API 觸發點 (供 cron-job.org 使用)
+  repository_dispatch:
+    types: [weekday_lite_task]
+
+  # 🛠️ 手動測試啟動
+  workflow_dispatch:
+    inputs:
+      task_type:
+        description: '選擇執行模式'
+        required: true
+        default: 'standard_run'
+        type: choice
+        options:
+          - standard_run      # 依照 JSON 排程執行
+          - network_check     # 執行全方位代理健檢 (Medic 版)
+          - force_run_all     # 強制掃描模式
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180  # 🚀 支撐擬態長休息，給予充足的3小時才關機
+    
+    steps:
+    - name: 📦 檢出程式碼
+      uses: actions/checkout@v4
+
+    - name: 🐍 設定 Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+    
+    - name: ⚙️ 安裝系統與 Python 依賴
+      run: |
+        sudo apt-get update && sudo apt-get install -y ffmpeg
+        python -m pip install --upgrade pip
+        # 安裝包含 GCP 儲存與 TLS 擬態所需的庫
+        # 🚀 [更新] 加入 supabase 函式庫，解決 ModuleNotFoundError
+        pip install "curl_cffi>=0.7.0" "requests[socks]" feedparser google-generativeai groq PySocks sgmllib3k python-dotenv google-cloud-storage supabase
+
+    # ================= [區塊 A：修正後的精準分流邏輯] =================
+    - name: 🔍 小隊環境判定 (Squad Triage)
+      id: triage
+      run: |
+        # 1. 取得當前 UTC 星期索引 (0=Mon, 6=Sun)
+        WEEK_INDEX=$(($(date -u +%u) - 1))
+        
+        # 2. 讀取今日小隊配置
+        PATH_ID=$(jq -r ".squad_config[\"$WEEK_INDEX\"].path_id" config/podcast_tactics.json)
+        TEAM_NAME=$(jq -r ".squad_config[\"$WEEK_INDEX\"].team" config/podcast_tactics.json)
+        RUN_MODE="${{ github.event.client_payload.task_type || github.event.inputs.task_type || 'standard_run' }}"
+        
+        echo "📅 今日 UTC 索引: $WEEK_INDEX | 小隊: $TEAM_NAME | 路徑: $PATH_ID"
+
+        # 🚀 [核心優化]：測試模式不再強制啟動 WARP
+        # 邏輯：只有純 GitHub 直連 (D) 與需中轉的 GCP (B) 才啟動斗篷。 
+        if [[ "$PATH_ID" =~ ^(B|D)$ ]]; then
+          echo "NEED_WARP=true" >> $GITHUB_ENV
+          echo "🛡️ [判定] $TEAM_NAME ($PATH_ID) 需隱身保護，啟動 WARP。"
+        else
+          echo "NEED_WARP=false" >> $GITHUB_ENV
+          echo "🎭 [判定] $TEAM_NAME ($PATH_ID) 具備專業代理或為原生環境，跳過 WARP。"
+        fi
+
+    # 🚀 [區塊 B]：條件式部署 (僅在 NEED_WARP 為 true 時執行)
+    - name: 🛡️ 部署 Cloudflare WARP 隱身斗篷
+      if: env.NEED_WARP == 'true'
+      uses: fscarmen/warp-on-actions@v1.1
+      with:
+        stack: nosh
+
+    # 🚀 [區塊 C]：條件式預熱 (僅在 NEED_WARP 為 true 時執行)
+    # ========== [區塊 C：具備超時控制的就緒自檢] =========
+    - name: 🔌 等待 WARP 服務就緒並驗證網路
+      if: env.NEED_WARP == 'true'
+      run: |
+        echo "⏳ 正在初始化 WARP 網路環境..."
+        # 1. 給予基礎緩衝
+        sleep 10 
+        
+        # 2. 強制檢查狀態 (限時 15 秒)
+        if ! timeout 15s sudo warp-cli --accept-tos status; then
+          echo "⚠️ WARP 狀態檢查逾時，嘗試重啟服務..."
+          sudo systemctl restart warp-svc
+          sleep 5
+        fi
+
+        # 🚀 [防卡死設計]：使用獨立的 timeout 執行檢測，不包在 echo 內
+        echo "📡 正在偵測出口 IP (洗滌後)..."
+        # 使用系統 timeout 15秒，即使網路斷掉也會在 15 秒內強制結束
+        timeout 15s curl -s4 --retry 1 https://api.ip.sb/geoip || echo "⚠️ 出口偵測逾時，將嘗試直接執行任務。"
+
+    - name: 🚀 執行任務 (Run Info Commander)
+      env:
+        # --- 核心 API 金鑰 ---
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        RENDER_WEBHOOK_URL: ${{ secrets.RENDER_WEBHOOK_URL }}
+        CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        
+        
+        # --- 🚀 GCP 雲端大腦金鑰 (用於同步 Cookies 與指紋庫) ---
+        GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+        
+        # --- 代理路徑安全變數 ---
+        VPS_PROXY_URL: ${{ secrets.VPS_PROXY_URL }}
+        PROXY_LIST: ${{ secrets.PROXY_LIST }}
+        GCP_PROXY_USER: ${{ secrets.GCP_PROXY_USER }}
+        GCP_PROXY_PASS: ${{ secrets.GCP_PROXY_PASS }}
+        GCP_PROXY_HOST: ${{ secrets.GCP_PROXY_HOST }}
+        GCP_PROXY_PORT: ${{ secrets.GCP_PROXY_PORT }}
+        
+        # 👇 [FLY 專用變數] --------------------------------
+        FLY_PROXY_JP: ${{ secrets.FLY_PROXY_JP }}
+        FLY_PROXY_LA: ${{ secrets.FLY_PROXY_LA }}
+        FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        # --------------------------------------------------
+        # 🚀 救援小隊專用變數
+        SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
+        WEBSHARE_LIST: ${{ secrets.WEBSHARE_LIST }}
+        SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
+        PYTHONUNBUFFERED: 1
+        # 自動抓取外部傳入的執行模式
+        RUN_MODE: ${{ github.event.client_payload.task_type || github.event.inputs.task_type || 'standard_run' }}
+      
+      run: |
+        if [ "${{ env.RUN_MODE }}" == "network_check" ]; then
+          echo "🔍 啟動全方位診斷：Podcast Proxy Medic..."
+          python src/podcast_proxy_medic.py
+
+        else
+          echo "🚀 執行模式: ${{ env.RUN_MODE }} | 系統時間: $(date -u)"
+          # 💡 已對齊：此時傳入的是 UTC 系統時間
+          python src/podcast_processor.py
+        fi
