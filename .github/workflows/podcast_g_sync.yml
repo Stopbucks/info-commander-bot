@@ -28,6 +28,8 @@ jobs:
       WEBSHARE_LIST: ${{ secrets.WEBSHARE_LIST }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }} # 🚀 新增
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}     # 🚀 新增
       # 🔐 [基礎設施] 共享資料庫與 Webhook
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}

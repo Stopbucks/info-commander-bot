@@ -39,6 +39,9 @@ jobs:
     - name: 🚀 執行 Archive.org 下載演習
       env:
         SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }} # 🚀 新增
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}     # 🚀 新增
+        
         PYTHONUNBUFFERED: 1
       run: |
         echo "💎 [單點攻堅啟動] 正在建立專用測試腳本..."
