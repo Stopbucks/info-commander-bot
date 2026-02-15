@@ -1,0 +1,11 @@
+{
+  "squad_config": {
+    "0": { "team": "FlyJP", "route": "Alpha", "proxy_key": "FLY_PROXY_JP", "launch_max": 1800, "path_id": "A" },
+    "1": { "team": "GcpUS", "route": "Pre-Beta", "proxy_key": "GCP_PROXY_US", "launch_max": 1200, "path_id": "B", "is_warmup": true },
+    "2": { "team": "GcpUS", "route": "Beta", "proxy_key": "GCP_PROXY_US", "launch_max": 2400, "path_id": "B" },
+    "3": { "team": "FlyLA", "route": "Pre-Gamma", "proxy_key": "FLY_PROXY_LA", "launch_max": 1200, "path_id": "C", "is_warmup": true },
+    "4": { "team": "FlyLA", "route": "Gamma", "proxy_key": "FLY_PROXY_LA", "launch_max": 1200, "path_id": "C" },
+    "5": { "team": "ScrapA", "route": "Rescue", "proxy_key": "SCRAP_API_KEY", "launch_max": 900, "path_id": "RE" },
+    "6": { "team": "GitAZ", "route": "Delta", "proxy_key": "DIRECT", "launch_max": 1800, "path_id": "D" }
+  }
+}
