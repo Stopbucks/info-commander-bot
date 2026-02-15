@@ -6,6 +6,7 @@ import sys
 import time
 import random
 import json
+import subprocess # 🚀 引入子進程模組，修復音訊壓縮崩潰問題 [cite: 2026-02-15]
 from supabase import create_client, Client  # 🚀 引入雲端指揮官
 from datetime import datetime, timezone, timedelta
 from podcast_monitor import MemoryManager
@@ -56,7 +57,7 @@ class PodcastProcessor:
     # --- [全新通訊區塊：取代 send_webhook] ---
     def send_telegram_report(self, content):
         """🚀 [通訊官] 直接將情報推播至 Telegram 頻道，達成零中轉、高隱私目標 [cite: 2026-02-15]"""
-        import requests
+        import requests # 內部引入確保模組獨立性
         
         if not self.tg_token or not self.tg_chat_id:
             print("⚠️ [通訊失敗] 偵測到 Telegram 金鑰缺失，請檢查 GitHub Secrets 設定。")
@@ -66,22 +67,20 @@ class PodcastProcessor:
         payload = {
             "chat_id": self.tg_chat_id,
             "text": content,
-            "parse_mode": "Markdown" # 一行註解：支援 Markdown 讓戰報呈現專業排版。
+            "parse_mode": "Markdown" # 支援 Markdown 讓戰報呈現專業排版
         }
 
-        # 🚀 執行：具備 3 次重試機制，對抗 GitHub Runner 偶發的網路抖動 [cite: 2026-02-15]
+        # 🚀 執行：具備 3 次重試機制，對抗 GitHub Runner 偶發的網路抖動
         for i in range(3):
             try:
                 resp = requests.post(url, json=payload, timeout=30)
                 if resp.status_code == 200:
                     print("✅ [情報發送] Telegram 戰報已送達基地。")
-                    return True
+                    return True # 成功發送，回傳 True
             except Exception as e:
                 print(f"⚠️ [嘗試 {i+1}] 發送失敗: {str(e)[:20]}...")
-                time.sleep(5)
-        return False
-    
-
+                time.sleep(5) # 失敗後稍作喘息再重試
+        return False # 三次嘗試皆失敗，回報通訊中斷
     # ---------------------------------------------------------
     # 新增：雲端任務領取與鎖定邏輯
     # ---------------------------------------------------------
@@ -362,35 +361,31 @@ class PodcastProcessor:
     #===========================================================================
 
     def _handle_gold_mission(self, entry, source, nav, date_label, squad_config):
-        """🏆 黃金等級：下載 + 深度分析流程 (閉環取證與全註解版) """
+        """🏆 黃金等級：下載 + 深度分析流程 (閉合邏輯與全註解版) """
         
-        # 1. 🛡️ 身分驗證：檢查當前 identity_hash 是否因過往風險而被列入黑名單
-        if not self.monitor.is_identity_safe(squad_config['identity_hash']): return
+        # 1. 🛡️ 身分驗證：檢查當前 identity_hash 是否安全
+        if not self.monitor.is_identity_safe(squad_config['identity_hash']): return False
           
-        # 2. 🚀 資源定位：從 RSS Entry 中提取符合音檔格式的下載網址
+        # 2. 🚀 資源定位：從 RSS Entry 中提取音檔網址
         audio_url = next((enc.href for enc in entry.enclosures if enc.type.startswith("audio")), "")
-        if not audio_url: return
+        if not audio_url: return False
 
-        # 3. 📡 戰前預熱：執行低頻探路，並捕捉潛在的 403 情報包裹
+        # 3. 📡 戰前預熱：執行低頻探路
         print(f"💎 [戰術] 正在對目標發起下載前的數位人格預熱...")
         warmup_res = nav.preflight_warmup(audio_url)
 
-        # 4. 🕵️ 異常取證：若預熱回傳字典，代表觸發 403，啟動情報封存程序
+        # 4. 🕵️ 異常取證：捕捉 403 情報包裹
         if isinstance(warmup_res, dict):
-            # 💡 將診斷細節（IP信譽/封鎖深度）存入事件簿
             self.monitor.record_incident_report(squad_config['identity_hash'], audio_url.split('/')[2], warmup_res)
-            # 💡 紀錄憲兵日誌：偵察失敗 (scout_fail) [cite: 2026-02-01]
             self.monitor.record_event(squad_config['identity_hash'], 403, target_url=audio_url, task_type="scout")
-            # 💡 閉環回饋：將此次失敗延遲紀錄進效能地圖
-            self.monitor.record_performance(audio_url.split('/')[2], warmup_res.get('latency_ms', 0), False)
-            return
+            return False # 偵察受阻，視為失敗
 
-        # 5. 🛑 熔斷檢查：若預熱因其他網路因素失敗且無數據回傳，終止任務
+        # 5. 🛑 熔斷檢查：若連線根本無法建立
         if not warmup_res:
             print("⚠️ [偵察失敗] 無法建立連線，中止本次運輸。")
-            return
+            return False
 
-        # 6. 🕒 戰鬥計時：啟動計時器以評估本次運輸任務的真實網路頻寬效能
+        # 6. 🕒 戰鬥計時：啟動評估
         start_mission_time = time.time()
         title = getattr(entry, "title", "Untitled")
         raw_mp3, final_mp3 = "temp_raw.mp3", "temp_final.mp3"
@@ -399,58 +394,57 @@ class PodcastProcessor:
             # 7. ⬇️ 實戰運輸：執行音檔下載
             if nav.download_podcast(audio_url, raw_mp3):
                 
-                # 🚀 [新增] 下載後的「餘韻停留」
-                # 💡 模擬人類在下載完成後，可能還在看網頁標籤或瀏覽其他資訊
+                # 8. 🏁 下載完成：執行餘韻停留
                 linger_time = random.uniform(5.0, 15.0)
-                print(f"🏁 [運輸完成] 保持連線餘韻 {linger_time:.1f} 秒，模擬人類留存行為...")
+                print(f"🏁 [運輸完成] 保持連線餘韻 {linger_time:.1f} 秒...")
                 time.sleep(linger_time)
 
-                # 8. 📊 效能結算與壓縮
+                # 9. 📊 效能結算與壓縮
                 latency = (time.time() - start_mission_time) * 1000
                 target = final_mp3 if self._compress_audio(raw_mp3, final_mp3) else raw_mp3
                 
-                # 🚀 [新增] AI 消化延遲
-                # 💡 人類不可能瞬間寫出摘要。模擬一段「消化節目內容」的時間
+                # 10. ⏳ AI 消化延遲
                 think_delay = random.randint(45, 90)
-                print(f"⏳ [擬態思維] 正在消化音檔內容，預計 {think_delay} 秒後產出分析報告...")
+                print(f"⏳ [擬態思維] 預計 {think_delay} 秒後產出分析報告...")
                 time.sleep(think_delay)
-                # 🚀 [Ring 方案] 下載與 AI 分析完後，執行一次「回頭瀏覽」
-                print(f"🔄 [Ring 戰術] 執行下載後回訪，建立行為閉環...")
-                nav.run_pre_combat_recon() # 再次訪問 Apple/Acast 首頁
+                
+                # 11. 🔄 Ring 戰術：執行下載後回訪建立閉環
+                print(f"🔄 [Ring 戰術] 執行下載後回訪...")
+                nav.run_pre_combat_recon()
 
-                # 10. 🧠 情報生成：調用 AI Agent
+                # 12. 🧠 情報生成：調用 AI Agent
                 analysis, q_score, duration = self.ai_agent.generate_gold_analysis(target)
 
                 if analysis:
-                    # 11. 📜 報告格式化：將所有採集到的原始數據彙整成可閱讀的任務戰報
+                    # 13. 📜 戰報彙整與發送
                     msg = self.ai_agent.format_mission_report(
                         "Gold", title, audio_url, analysis, date_label, 
                         duration, source["name"], audio_duration=getattr(entry, "itunes_duration", "未知")
                     )
-                    # 12. 📤 情報發送：戰報推送至 Telegram 通訊頻道
                     self.send_telegram_report(msg)
 
-                    # 13. 💾 閉環紀錄：紀錄運輸成功 (mission_ok) 並更新伺服器效能地圖 [cite: 2026-02-03]
+                    # 14. 💾 閉環紀錄
                     self.monitor.record_event(squad_config['identity_hash'], 200, target_url=audio_url, task_type="mission")
                     self.monitor.record_performance(audio_url.split('/')[2], latency, True)
+                    
+                    return True # 🚀 關鍵修正：任務全面成功，回傳 True 觸發 Supabase 結案 [cite: 2026-02-15]
+
+                return False # AI 分析未產出結果，標記為失敗以供未來重試
 
         except Exception as e:
-            # 14. 🚑 戰損處理：任務崩潰時執行故障診斷
+            # 15. 🚑 戰損處理：任務崩潰診斷
             latency = (time.time() - start_mission_time) * 1000
-            status = 403 if "403" in str(e) else 500
-            
-            # 🚀 [優化升級]：失敗時自動掛號，交由 Rescuer 補救
-            print(f"❌ [任務崩潰] 啟動自動掛號程序...")
+            print(f"❌ [任務崩潰] 啟動自動掛號程序... 原因: {e}")
             self.monitor.add_pending_mission(source["name"], audio_url, mission_type="failed_retry")
-            
-            self.monitor.record_event(squad_config['identity_hash'], status, target_url=audio_url, task_type="mission")
+            self.monitor.record_event(squad_config['identity_hash'], 500, target_url=audio_url, task_type="mission")
             self.monitor.record_performance(audio_url.split('/')[2], latency, False)
-            print(f"⚠️ [情報封存] 已紀錄失敗數據，待 03:00 救援兵處理。")
+            return False # 遭遇異常，明確回傳失敗狀態
             
         finally:
-            # 15. 🧹 戰場清理：徹底刪除本地臨時音檔，確保 GitHub Runner 空間潔淨
+            # 16. 🧹 戰場清理
             for f in [raw_mp3, final_mp3]:
                 if os.path.exists(f): os.remove(f)
+
 
     def _handle_platinum_mission(self, entry, source, nav, date_label):
         """💿 白金等級：純文字簡介流程"""
