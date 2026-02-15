@@ -118,23 +118,26 @@ class NetworkNavigator:
     
 
     def run_pre_flight_check(self):
-        # 🚀 執行輕量擬態脈衝增加身分權重
-        self.perform_mimicry_pulse(mode="light")
-        path_id = self.config.get('path_id', 'Unknown')
-        print(f"📡 [深度體檢中] 驗證路徑 ID: {path_id}...")
-        results = {"status": False, "data": {}}
-        
-        # 🚀 [策略修正]：若為救援路徑 (RE)，直接放行，避開複雜代理握手導致的超時
-        if path_id == "RE":
-            print("🚀 [救援路徑] 免除第三方 IP 鑑識，直接出航 (Trust ScraperAPI).")
+        # 🚀 [戰術優先]：若為 RE 路徑，立刻放行，嚴禁執行任何擬態行為以節省點數與時間
+        if self.path_id == "RE":
+            print("🚀 [救援路徑] 已偵測到 ScraperAPI，跳過擬態與體檢，直接出航。")
             return {"status": True, "data": {"ip": "Verified_via_RE", "org": "ScraperAPI_Mesh"}}
 
-        # 🛡️ 標準路徑 (A, B, C, D) 執行嚴格體檢
+        # --- print("前面程式碼相同") --- #
+        # -----(定位線)以下為標準路徑 (A, B, C, D) 專屬邏輯-----
+
+        # 🛡️ 執行輕量擬態脈衝增加身分權重 (僅限非 RE 路徑)
+        self.perform_mimicry_pulse(mode="light")
+        
+        print(f"📡 [深度體檢中] 驗證路徑 ID: {self.path_id}...")
+        results = {"status": False, "data": {}}
+        
         try:
             ip_data = {}
+            # 💡 遍歷多個 IP 診斷接口，確保標準路徑的 IP 變更已生效
             for api in ["http://ip-api.com/json/", "https://ipapi.co/json/"]:
                 try:
-                    # 💡 體檢連線也加入 verify=False，確保環境不干擾診斷
+                    # 執行一行註解說明：使用 verify=False 避免部分環境 SSL 握手失敗。
                     resp = self.session.get(api, timeout=15, verify=False)
                     if resp.status_code == 200:
                         ip_data = resp.json()
@@ -153,7 +156,7 @@ class NetworkNavigator:
         except Exception as e:
             print(f"⚠️ [自檢中斷] 異常: {e}")
             return results
-
+        
  # --統一標頭變數名稱並確保運輸安全----
     def download_podcast(self, url, filename):
         r = None
