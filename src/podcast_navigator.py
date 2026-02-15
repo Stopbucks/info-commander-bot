@@ -20,10 +20,11 @@ class NetworkNavigator:
         self.path_id = self.config.get("path_id") # 擷取目前的戰術路徑編號 (如 RE, Alpha)。
         
         if self.path_id == "RE":
-            # 🛡️ 當路徑為 RE 時，我們將擬態責任完全交給 ScraperAPI 雲端
-            print("🛡️ [引擎分流] RE 路徑啟動：採用標準 requests 搭配 ScraperAPI。")
-            self.session = std_requests.Session() # 建立標準連線池，避免 curl_cffi 版本衝突。
-            self.session.proxies = { # 將 ScraperAPI 代理地址注入連線池。
+            print("🛡️ [引擎分流] RE 路徑啟動：採用標準 requests。")
+            self.session = std_requests.Session()
+            # 🚀 [關鍵修正]：徹底清空標準庫預設標頭，避免與代理伺服器衝突
+            self.session.headers.clear() 
+            self.session.proxies = {
                 "http": self.config.get("transport_proxy"),
                 "https": self.config.get("transport_proxy")
             }
@@ -34,7 +35,10 @@ class NetworkNavigator:
             self.session = cffi_requests.Session(impersonate=imp) # 使用 curl_cffi 執行身分偽裝。
 
         # 💉 統一注入自定義 Header 與 Cookie
-        self.session.headers.update(self.config.get('curl_config', {}).get('headers', {})) # 根據配置同步更新標頭。
+        extra_headers = self.config.get('curl_config', {}).get('headers', {})
+        if extra_headers:
+            self.session.headers.update(extra_headers)
+        #self.session.headers.update(self.config.get('curl_config', {}).get('headers', {})) # 根據配置同步更新標頭。
 
         print(f"🎭 [身分識別] 小隊: {self.config['squad_name']} | Hash: {self.config['identity_hash']}")
 
@@ -45,43 +49,7 @@ class NetworkNavigator:
     # 🚀 支援 with 語法的結束動
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-
  
-    def _init_session(self):
-        """🚀 [連線池初始化] 針對 ScraperAPI 採取透明傳輸，其餘維持強擬態 [cite: 2026-02-14]"""
-        path_id = self.config.get('path_id') # 獲取目前的傳輸路徑標記。
-        
-        # 🏹 [智慧分流]：判定是否為 ScraperAPI 路徑以避免雙重擬態衝突 (HTTP 400)
-        if path_id == "RE":
-            print("💎 [ScraperAPI] 採用標準 HTTP/1.1 透明傳輸協定 (穩定版)。")
-            # 🚀 關鍵修正：強制指定 HttpVersion.V1_1，避開代理層的 H2 衝突
-            from curl_cffi import requests as cffi_requests
-            session = cffi_requests.Session(http_version=cffi_requests.HttpVersion.V1_1)
-        else:
-            # 🛡️ 標準擬態流程：根據演進引擎發放裝備
-            imp = self.config.get('curl_config', {}).get('impersonate', 'chrome110')
-            try:
-                session = requests.Session(impersonate=imp) # 嘗試發起擬態連線。
-            except Exception as e:
-                print(f"🚨 [裝備報警] 版本 {imp} 異常，切換至穩定版備援。")
-                session = requests.Session(impersonate="chrome110") # 執行備援擬態。
-
-        # 2. 標頭淨化：套用傳入的自定義 Headers (如有)
-        session.headers.update(self.config.get('curl_config', {}).get('headers', {})) # 注入配置標頭。
-
-        # 3. 代理配置：確保在 return 之前完成掛載
-        proxy_url = self.config.get('transport_proxy') # 讀取目前的代理地址。
-        if proxy_url and proxy_url != "GitHub_Runner_Direct":
-            session.proxies = {"http": proxy_url, "https": proxy_url} # 執行代理隧道綁定。
-        
-        # 4. 身分繼承：掛載歷史 Cookies 紀錄
-        history_cookies = self.config.get('history_cookies') # 領取雲端同步的身分紀錄。
-        if history_cookies:
-            session.cookies.update(history_cookies) # 執行身分繼承。
-            print(f"📦 [身分繼承] 已掛載身分 {self.config['identity_hash']} 的 Cookies。")
-
-        return session # 確保所有設定完成後才回傳連線池實例。
-
 
     def perform_mimicry_pulse(self, mode="light", count=3):
         # 🚀 根據模式決定訪問類別 (輕量用喚醒，重裝用新聞)
@@ -159,18 +127,15 @@ class NetworkNavigator:
     def download_podcast(self, url, filename):
         r = None
         try:
-            # 只有非 RE 路徑才需要漫長暖身
+            # 🚀 [節能優先]：RE 路徑禁止在下載前執行 heavy 擬態
             if self.path_id != "RE":
                 self.perform_mimicry_pulse(mode="heavy")
                 self._perform_mimic_knock(url)
             
             print(f"📡 [發起任務] 目標網址: {url} (路徑: {self.path_id})")
             
-            # 💡 [關鍵修正]：不再手動定義 headers_to_use。
-            # 標準路徑會使用 __init__ 時注入的 Session Headers。
-            # RE 路徑則會因為 Outfitter 給的是空字典，而發出最純淨的請求。 [cite: 2026-02-15]
-            r = self.session.get(url, stream=True, timeout=300, 
-                                 allow_redirects=True, verify=False)
+            # 💡 直接調用 Session，Session 內部已包含正確的標頭與代理設定
+            r = self.session.get(url, stream=True, timeout=300, allow_redirects=True, verify=False)
             r.raise_for_status()
             
             with open(filename, "wb") as f:
@@ -183,7 +148,7 @@ class NetworkNavigator:
             return False
         finally:
             if r: r.close()
-# -----(定位線)下載邏輯修正完成-----
+
 
 
     # 🔥 [進化戰技] 幽靈取證：403 熔斷與長延遲試探  
