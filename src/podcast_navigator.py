@@ -4,7 +4,8 @@
 
 import time
 import random
-from curl_cffi import requests
+import requests as std_requests # 使用 std_requests 作為標準庫別名，專門對接 ScraperAPI。
+from curl_cffi import requests as cffi_requests # 使用 cffi_requests 作為強擬態庫別名，處理 TLS 指紋。
 # 🚀 引入共通工具與配置 [cite: 2026-02-02]
 from podcast_utils import MIMIC_POOL, mask_ip, get_random_mimic_target, get_random_jitter, is_target_sensitive
 
@@ -15,8 +16,26 @@ class NetworkNavigator:
     """
     
     def __init__(self, squad_config):
-        self.config = squad_config
-        self.session = self._init_session()
+        self.config = squad_config # 將傳入的小隊配置儲存於實體中。
+        self.path_id = self.config.get("path_id") # 擷取目前的戰術路徑編號 (如 RE, Alpha)。
+        
+        if self.path_id == "RE":
+            # 🛡️ 當路徑為 RE 時，我們將擬態責任完全交給 ScraperAPI 雲端
+            print("🛡️ [引擎分流] RE 路徑啟動：採用標準 requests 搭配 ScraperAPI。")
+            self.session = std_requests.Session() # 建立標準連線池，避免 curl_cffi 版本衝突。
+            self.session.proxies = { # 將 ScraperAPI 代理地址注入連線池。
+                "http": self.config.get("transport_proxy"),
+                "https": self.config.get("transport_proxy")
+            }
+        else:
+            # 🎭 其餘路徑 (如 A, B, C, D) 則在本地端執行 TLS 指紋擬態
+            imp = self.config.get("curl_config", {}).get("impersonate", "chrome124") # 獲取擬態目標版本。
+            print(f"🎭 [引擎分流] 啟動強擬態模式 (impersonate: {imp})。")
+            self.session = cffi_requests.Session(impersonate=imp) # 使用 curl_cffi 執行身分偽裝。
+
+        # 💉 統一注入自定義 Header 與 Cookie
+        self.session.headers.update(self.config.get('curl_config', {}).get('headers', {})) # 根據配置同步更新標頭。
+
         print(f"🎭 [身分識別] 小隊: {self.config['squad_name']} | Hash: {self.config['identity_hash']}")
 
     # 🚀 支援 with 語法的第一動
