@@ -39,7 +39,15 @@ class TacticalOutfitter:
             "GITHUB_RUNNER_EDGE":  {"impersonate": get_evolved_persona("GIT"), "headers": {}, "jitter": (1.0, 3.0)},
             
             # 🚀 救援重裝：高效率突擊
-            "RESCUE_HEAVY_DESKTOP":{"impersonate": "chrome120", "headers": {}, "jitter": (1.0, 2.0)}
+            "RESCUE_HEAVY_DESKTOP": {
+                "impersonate": "chrome120", 
+                "headers": {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    "Accept": "*/*",
+                    "Connection": "keep-alive"
+                }, 
+                "jitter": (1.0, 2.0)
+            }
         }
 
     def get_squad_config(self, timestamp, force_rescue=False):

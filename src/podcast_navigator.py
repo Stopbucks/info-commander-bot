@@ -118,14 +118,12 @@ class NetworkNavigator:
     
 
     def run_pre_flight_check(self):
-        # 🚀 [戰術優先]：若為 RE 路徑，立刻放行，嚴禁執行任何擬態行為以節省點數與時間
+        # 🚀 [修正]：RE 路徑擁有最高優先權，嚴禁執行任何擬態以節省時間與金錢
         if self.path_id == "RE":
             print("🚀 [救援路徑] 已偵測到 ScraperAPI，跳過擬態與體檢，直接出航。")
             return {"status": True, "data": {"ip": "Verified_via_RE", "org": "ScraperAPI_Mesh"}}
 
-        # --- print("前面程式碼相同") --- #
-        # -----(定位線)以下為標準路徑 (A, B, C, D) 專屬邏輯-----
-
+        # 🛡️ 標準路徑 (A, B, C, D) 才執行擬態脈衝與 IP 診斷
         # 🛡️ 執行輕量擬態脈衝增加身分權重 (僅限非 RE 路徑)
         self.perform_mimicry_pulse(mode="light")
         
@@ -161,41 +159,29 @@ class NetworkNavigator:
     def download_podcast(self, url, filename):
         r = None
         try:
-            self.perform_mimicry_pulse(mode="heavy")
-            self._perform_mimic_knock(url)
-            time.sleep(get_random_jitter(0.8, 1.5))
-            
-            # 🚀 [核心修正]：統一變數名稱為 headers_to_use
-            if self.config.get('path_id') == "RE":
-                print("💎 [ScraperAPI] 注入基礎導航標頭以優化穿透力。")
-                # 💡 為 ScraperAPI 準備最精簡的真實瀏覽器特徵
-                headers_to_use = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                    "Accept": "*/*",
-                    "Connection": "keep-alive"
-                }
-            else:
-                headers_to_use = None # 其餘小隊維持 Session 預設的演進指紋。
+            # 非 RE 路徑執行擬態脈衝
+            if self.path_id != "RE":
+                self.perform_mimicry_pulse(mode="heavy")
+                self._perform_mimic_knock(url)
 
-            print(f"📡 [發起任務] 目標網址: {url}")
+            print(f"📡 [發起任務] 目標網址: {url} (採用路徑: {self.path_id})")
             
-            # 🚀 執行 GET 請求，確保使用正確的標頭變數與 SSL 豁免
+            # 💡 標頭已經在 __init__ 時透過 self.session.headers.update() 注入了
+            # 所以這裡不需要再額外傳入 headers 參數
             r = self.session.get(url, stream=True, timeout=300, 
-                                 allow_redirects=True, verify=False,
-                                 headers=headers_to_use) # 一行註解：確保使用淨化後的標頭。
+                                 allow_redirects=True, verify=False)
             r.raise_for_status()
             
-            # 🚀 執行流式寫入
             with open(filename, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     if chunk: f.write(chunk)
-            print(f"✅ 運輸成功：音檔已安全送達 {filename}")
+            print(f"✅ 運輸成功：音檔已送達 {filename}")
             return True
         except Exception as e:
             print(f"❌ 運輸失敗：{str(e)}")
             return False
         finally:
-            if r: r.close() # 確保連線資源釋放。
+            if r: r.close()
 
 
     # 🔥 [進化戰技] 幽靈取證：403 熔斷與長延遲試探  
@@ -203,6 +189,10 @@ class NetworkNavigator:
         """
         🔥 [預熱] 整合 HEAD 探路、中立哨所檢查與幽靈長延遲取證
         """
+        # 🚀 [戰術修正]：救援路徑不需要預熱，直接進入實戰
+        if self.path_id == "RE":
+            return True 
+
         host = target_url.split('/')[2]
         print(f"🔍 [預熱-HEAD] 正在對目標發起低頻探路: {host}")
         
@@ -258,6 +248,10 @@ class NetworkNavigator:
  
     def run_rest_warmup(self):
         """🔥 [休息日] 深度溫養計畫：模擬真實人類的新聞閱讀行為"""
+        # 🚀 [節能修正]：ScraperAPI 不需要模擬人格，省下 3-5 次請求點數
+        if self.path_id == "RE":
+            print("🛡️ [節能模式] RE 路徑跳過休息日溫養計畫。")
+            return
         print(f"🎭 [導航員] 啟動國際化人格溫養模式...")
         
         if random.random() > 0.3:
@@ -289,6 +283,8 @@ class NetworkNavigator:
 
     def run_pre_combat_recon(self, target_url="https://podcasts.apple.com/"):
         """💎 [實戰日] 戰前偵察"""
+        if self.path_id == "RE":
+            return 
         print(f"📡 [導航員] 執行戰前前哨偵察...")
         self._perform_mimic_knock(target_url, warm_up=False)
         # 🛡️ 這裡保留 3-6 秒思考時間 [cite: 2026-02-02]
@@ -297,6 +293,15 @@ class NetworkNavigator:
 
     def save_identity_state(self, current_ip=None, current_org=None):
         """💾 [存檔] 確保身分證包含 IP 與 ISP 資訊"""
+        # 🚀 [修正] 針對 RE 路徑簡化存檔內容，避免無謂的 IP 查詢
+        if self.path_id == "RE":
+            return {
+                "identity_hash": self.config['identity_hash'],
+                "ip": "ScraperAPI_Dynamic",
+                "org": "ScraperAPI_Mesh",
+                "last_active": time.time(),
+                "path_id": "RE"
+            }
         try:
             return {
                 "cookies": self.session.cookies.get_dict(),
