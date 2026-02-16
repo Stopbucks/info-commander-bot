@@ -53,7 +53,9 @@ def run_scra_officer():
             podbay_search = f"https://podbay.fm/search?q={encoded_query}"
             
             # 使用 ScraperAPI 攻堅
-            resp = requests.get(podbay_search, proxies=proxies, timeout=40, verify=False)
+            #resp = requests.get(podbay_search, proxies=proxies, timeout=40, verify=False)
+            #兩個網站攻堅，拉長時間
+            resp = requests.get(target_url, proxies=proxies, timeout=60, verify=False)
             soup = BeautifulSoup(resp.text, 'html.parser')
             
             # 搜尋匹配集數連結
