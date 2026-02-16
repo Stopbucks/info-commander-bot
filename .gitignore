@@ -11,6 +11,7 @@ history_data/
 daily_checkpoint.json
 *.mp3
 *.txt
+!requirements.txt
 *.json.info
 # --- 防堵所有備份檔與變體 ---
 *.bak
