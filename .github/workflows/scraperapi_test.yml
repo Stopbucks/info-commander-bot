@@ -1,17 +1,17 @@
 ##########################################################################
-# 🧪 ScraperAPI 單點攻堅測試 v1.4
+# 🧪 S-Plan 解碼官首航測試 v2.0
 ##########################################################################
-# 目的：採用 RS (Rescue-Standalone) 獨立路徑腳本。
-# 特色：不依賴 src/ 邏輯，徹底排除 400/499 衝突，驗證 API 與代理通道。
+# 目的：測試 podcast_scra_officer.py 是否能領取標題並成功解碼 MP3 連結。
+# 特色：完整串接 Supabase 與 ScraperAPI，實現情報回填閉環。
 ##########################################################################
 
-name: 🧪 ScraperAPI Single Point Test
+name: 🧪 S-Plan Officer Decoding Test
 
 on:
   workflow_dispatch: # 支援在 GitHub 介面手動啟動任務
 
 jobs:
-  single_target_test:
+  officer_decoding_test:
     runs-on: ubuntu-latest
     steps:
     - name: 📦 檢出程式碼
@@ -21,20 +21,22 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
-        cache: 'pip' # 開啟 pip 快取機制加速後續執行
+        cache: 'pip'
 
     - name: ⚙️ 安裝必要依賴
       run: |
-        sudo apt-get update && sudo apt-get install -y ffmpeg # 系統層：安裝音訊壓縮必要組件
-        python -m pip install --upgrade pip # 環境層：確保套件管理工具為最新版
-        pip install "curl_cffi>=0.7.0" "requests[socks]" feedparser google-generativeai groq PySocks sgmllib3k python-dotenv google-cloud-storage supabase # 應用層：安裝專案所需函式庫
+        python -m pip install --upgrade pip
+        # 🚀 關鍵：確保安裝了 supabase 與 BeautifulSoup
+        pip install requests beautifulsoup4 supabase python-dotenv
 
-#--- [步驟：執行下載演習] 前面 YML 結構相同 ---#
-    - name: 🚀 執行 RS 獨立路徑攻堅演習
+    - name: 🚀 執行解碼官領命演習
       env:
+        # 🔗 必須提供以下三個 Secrets 才能完成情報對接
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
         PYTHONUNBUFFERED: 1
       run: |
-        echo "🛡️ [抹除舊邏輯] 啟動純淨 RS 沙盒測試..."
-        python src/rs_pilot_test.py # 🚀 改為執行獨立檔案
- 
+        echo "📡 [啟動指令] 正在呼叫解碼官執行任務..."
+        # 🎯 改為執行解碼官主程式
+        python src/podcast_scra_officer.py
