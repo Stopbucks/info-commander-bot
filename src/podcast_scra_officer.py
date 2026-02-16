@@ -3,15 +3,22 @@
 # 從 mission_queue 領命(scrape_status = 'pending')，以ScraperAPI (8001 端口) 
 # 前往 Podbay 精確定位集數，提取 MP3 門票網址，帶回網址寫入 podbay_url 並標記為 success。
 #---------------------------------------------------------------
+
 import os, requests, urllib.parse, time, re
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
 
 def clean_title(title):
-    # 🚀 戰術洗滌：移除括號內容與特殊符號，只留核心關鍵字 [cite: 2026-02-16]
-    cleaned = re.sub(r'\(.*?\)', '', title) # 移除 (溫養日) 等括號
-    cleaned = re.sub(r'[^\w\s]', ' ', cleaned) # 移除標點符號
-    return cleaned[:45].strip()
+    # 🚀 戰術洗滌 v2.4：處理噪音、括號與過長字串
+    # 1. 移除常見噪音前綴 (如 Replay -, Update -) [cite: 2026-02-16]
+    title = re.sub(r'^(Replay|Update|Special)\s*[-:]\s*', '', title, flags=re.IGNORECASE)
+    # 2. 移除括號內容 (如 (溫養日))
+    title = re.sub(r'\(.*?\)', '', title)
+    # 3. 移除冒號與破折號後面的內容 (通常是子標題，會干擾搜尋)
+    title = title.split(' - ')[0].split(': ')[0]
+    # 4. 只取前 5 個單字，增加搜尋寬容度 [cite: 2026-02-16]
+    words = title.split()
+    return " ".join(words[:5]).strip()
 
 def run_scra_officer():
     sb_url = os.environ.get("SUPABASE_URL")
@@ -19,28 +26,27 @@ def run_scra_officer():
     scra_key = os.environ.get("SCRAP_API_KEY")
 
     if not all([sb_url, sb_key, scra_key]):
-        print("❌ [資安警報] 缺少憑證。")
+        print("❌ [憑證遺失]")
         return
 
     supabase: Client = create_client(sb_url, sb_key)
     proxy_url = f"http://scraperapi:{scra_key}@proxy-server.scraperapi.com:8001"
     proxies = {"http": proxy_url, "https": proxy_url}
 
-    # 🚀 領取 2 筆任務執行對照測試 [cite: 2026-02-16]
-    missions = supabase.table("mission_queue").select("*").eq("scrape_status", "pending").limit(2).execute()
+    # 🚀 模擬自動化：領取 3 筆待處理任務 (包含您剛才在 Supabase 手動重置的筆數)
+    missions = supabase.table("mission_queue").select("*").eq("scrape_status", "pending").limit(3).execute()
 
     if not missions.data:
-        print("☕ [休假中] 目前沒有待處理的 pending 任務。")
+        print("☕ [庫存清空] 沒有 pending 任務。")
         return
-
-    print(f"探員領命：本次將處理 {len(missions.data)} 筆任務。")
 
     for target in missions.data:
         task_id = target['id']
-        original_title = target['episode_title']
-        search_query = clean_title(original_title)
+        raw_title = target['episode_title']
+        search_query = clean_title(raw_title)
         
-        print(f"\n--- 📡 偵察啟動：{search_query} ---")
+        print(f"\n📡 [測試任務] 原始：{raw_title[:30]}...")
+        print(f"🔍 [洗滌關鍵字]：{search_query}")
 
         try:
             encoded_query = urllib.parse.quote(search_query)
@@ -50,12 +56,12 @@ def run_scra_officer():
             resp = requests.get(podbay_search, proxies=proxies, timeout=40, verify=False)
             soup = BeautifulSoup(resp.text, 'html.parser')
             
-            # 尋找匹配連結
-            ep_link_tag = soup.find('a', href=re.compile(r'/p/.+/e/\d+'))
+            # 搜尋匹配集數連結
+            ep_link_tag = soup.find('a', href=re.compile(r'/p/.+/e/.*'))
             
             if ep_link_tag:
                 full_ep_url = f"https://podbay.fm{ep_link_tag['href']}"
-                print(f"🎯 [定位成功]：{full_ep_url}")
+                print(f"🎯 [定位成功] 網址：{full_ep_url}")
 
                 ep_resp = requests.get(full_ep_url, proxies=proxies, timeout=30, verify=False)
                 ep_soup = BeautifulSoup(ep_resp.text, 'html.parser')
@@ -68,18 +74,17 @@ def run_scra_officer():
                         "podbay_url": final_mp3_url,
                         "scrape_status": "success"
                     }).eq("id", task_id).execute()
-                    print(f"✅ [入庫成功]")
+                    print(f"✅ [入庫成功] MP3 已就緒。")
                 else:
-                    print("❌ [無效頁面] 找不到 MP3 連結。")
+                    print("❌ [門票遺失] 頁面內找不到 MP3。")
             else:
                 print(f"⚠️ [搜尋失敗] Podbay 找不到：{search_query}")
                 supabase.table("mission_queue").update({"scrape_status": "failed"}).eq("id", task_id).execute()
 
         except Exception as e:
-            print(f"💥 [技術故障] {str(e)}")
+            print(f"💥 [故障] {str(e)}")
         
-        # 避免連續請求太快，稍微喘息一下
-        time.sleep(2)
+        time.sleep(2) # 戰術喘息
 
 if __name__ == "__main__":
     run_scra_officer()
