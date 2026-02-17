@@ -1,12 +1,14 @@
 
 #---------------------------------------------------------------
-# 本程式碼：podcast_scra_officer.py v2.12 (高 CP 廣域提取版)
-# 修正：取消主頁渲染(省點數)、廣域掃描 MP3 標籤、安全備援
+# 本程式碼：pod_scra_officer.py v3.0 (接續測試下載程序)
+# 完成測試：透過scraperAPI、廣域掃描 MP3 標籤、安全備援
 #---------------------------------------------------------------
 
 import os, requests, urllib.parse, time, re, urllib3
+
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
+from datetime import datetime, timezone
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -53,15 +55,24 @@ def run_scra_officer():
                     if mp3_link: final_mp3_url = mp3_link['href']
         except: pass
 
-        # --- 最終結算 ---
-        if final_mp3_url:
-            supabase.table("mission_queue").update({"podbay_url": final_mp3_url, "scrape_status": "success"}).eq("id", task_id).execute()
-            print(f"🚀 [大捷] 成功取得門票：{final_mp3_url[:40]}...")
-        else:
-            supabase.table("mission_queue").update({"scrape_status": "failed"}).eq("id", task_id).execute()
-            print(f"❌ [失敗] 標題：{raw_title[:20]}")
         
-        time.sleep(3)
-
+        # --- 最終結算 (S-Plan 2.0 接力版) ---
+        if final_mp3_url:
+            # 🚀 關鍵：回填門票連結，並重設 status 為 pending 讓運輸兵接力 [cite: 2026-02-16]
+            # 💡 同時更新 created_at 作為門票發放的起點時間
+            update_data = {
+                "podbay_url": final_mp3_url,
+                "scrape_status": "success",
+                "status": "pending",  # 標記為待運輸
+                "created_at": datetime.now(timezone.utc).isoformat() # 供時效演練計時 [cite: 2026-02-16]
+            }
+            supabase.table("mission_queue").update(update_data).eq("id", task_id).execute()
+            print(f"✅ [成功入庫] 門票核發完成：{final_mp3_url[:40]}...")
+        else:
+            supabase.table("mission_queue").update({
+                "scrape_status": "failed",
+                "status": "failed"
+            }).eq("id", task_id).execute()
+            print(f"❌ [失敗] 無法取得有效連結：{raw_title[:20]}")
 if __name__ == "__main__":
     run_scra_officer()

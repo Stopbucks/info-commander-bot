@@ -1,17 +1,17 @@
 ##########################################################################
-# 🧪 S-Plan 解碼官首航測試 v2.0
+# 🏃 S-Plan 3.0 全鏈條接力演習 (Officer + Transport)
 ##########################################################################
-# 目的：測試 podcast_scra_officer.py 是否能領取標題並成功解碼 MP3 連結。
-# 特色：完整串接 Supabase 與 ScraperAPI，實現情報回填閉環。
+# 目的：實現「解碼 -> 運輸」自動接力，驗證 Podbay 門票時效與直通車可行性。
+# 流程：1. 解碼官獲取連結 -> 2. 戰術冷卻 -> 3. 運輸兵執行延時下載測試。
 ##########################################################################
 
-name: 🧪 S-Plan Officer Decoding Test
+name: 🏃 S-Plan 2.0 Relay Race Test
 
 on:
-  workflow_dispatch: # 支援在 GitHub 介面手動啟動任務
+  workflow_dispatch: # 支援手動觸發
 
 jobs:
-  officer_decoding_test:
+  relay_mission:
     runs-on: ubuntu-latest
     steps:
     - name: 📦 檢出程式碼
@@ -23,20 +23,39 @@ jobs:
         python-version: '3.12'
         cache: 'pip'
 
-    - name: ⚙️ 安裝必要依賴
+    - name: ⚙️ 安裝必要依賴 (含未來運輸所需的 boto3)
       run: |
         python -m pip install --upgrade pip
-        # 🚀 關鍵：確保安裝了 supabase 與 BeautifulSoup
-        pip install requests beautifulsoup4 supabase python-dotenv
+        pip install requests beautifulsoup4 supabase python-dotenv boto3
 
-    - name: 🚀 執行解碼官領命演習
+    # ---------------------------------------------------------
+    # 第一棒：解碼官 (Officer) - 領票行動 [cite: 2026-02-16]
+    # ---------------------------------------------------------
+    - name: 🎯 執行解碼任務 (Officer)
       env:
-        # 🔗 必須提供以下三個 Secrets 才能完成情報對接
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
         PYTHONUNBUFFERED: 1
       run: |
-        echo "📡 [啟動指令] 正在呼叫解碼官執行任務..."
-        # 🎯 改為執行解碼官主程式
-        python src/podcast_scra_officer.py
+        echo "📡 [第一棒] 呼叫解碼官執行任務..."
+        python src/pod_scra_officer.py
+
+    - name: 🕒 戰術冷卻 (等待 10 秒確保雲端地基同步)
+      run: sleep 10
+
+    # ---------------------------------------------------------
+    # 第二棒：運輸兵 (Transport) - 直通車下載測試 [cite: 2026-02-16]
+    # ---------------------------------------------------------
+    - name: 🚚 執行運輸測試 (Transport v0.1)
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        # 預留 R2 金鑰，確保環境變數對齊
+        R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+        R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        PYTHONUNBUFFERED: 1
+      run: |
+        echo "🚚 [第二棒] 呼叫運輸兵驗證門票時效..."
+        python src/pod_scra_transport.py
