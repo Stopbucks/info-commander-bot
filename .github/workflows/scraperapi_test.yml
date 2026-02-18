@@ -28,8 +28,8 @@ jobs:
     - name: ⚙️ 安裝必要依賴
       run: |
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 supabase python-dotenv boto3
-
+        pip install requests beautifulsoup4 supabase python-dotenv boto3 google-generativeai groq
+        
     # ---------------------------------------------------------
     # 第一棒：解碼官 (Officer) - 領票行動
     # ---------------------------------------------------------
@@ -46,19 +46,22 @@ jobs:
     - name: 🕒 戰術冷卻 (等待 10 秒)
       run: sleep 10
 
-    # ---------------------------------------------------------
-    # 第二棒：運輸兵 (Transport) - 長效抖動下載測試
-    # ---------------------------------------------------------
-    - name: 🚚 執行運輸測試 (Transport v0.4)
-      # 一行註解：針對此步驟單獨設定超時，確保深度延遲不被系統強行中斷。
-      timeout-minutes: 15 
+
+#--- 確保此區塊位於 steps: 下方並正確縮進 ---#
+    - name: 🚚 執行運輸與 AI 摘要任務
+      timeout-minutes: 20
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
         R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        # 🚀 帶入 AI 金鑰與通訊官憑證
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         PYTHONUNBUFFERED: 1
       run: |
-        echo "🚚 [第二棒] 呼叫運輸兵執行深度抖動驗證..."
+        echo "🚚 [啟動] 運輸兵執行入庫並呼叫智囊團..."
         python src/pod_scra_transport.py
