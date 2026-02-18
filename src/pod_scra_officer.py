@@ -63,8 +63,11 @@ class StrategyManager:
         scra_balance = get_scraperapi_balance(self.scra_key)
         print(f"📊 ScraperAPI 即時庫存：{scra_balance} 點")
         
-        # 風險提醒：若 ScraperAPI 低於 50 點，自動切換至 ZenRows 備援
-        if scra_balance < 50:
+        #--------------------------------------------------------
+        # 點換閥值轉換區
+        # 風險提醒：若 ScraperAPI 低於 80 點，自動切換至 ZenRows 備援
+        #--------------------------------------------------------
+        if scra_balance < 80:
             return "ZENROWS"
         return "SCRAPERAPI"
 
