@@ -1,8 +1,8 @@
 
 #---------------------------------------------------------------
-# 本程式碼：src/pod_scra_officer.py v4.5 (S-Plan 自適性偵察版)
-# 任務：實作即時 API 餘額偵測、永久模式記憶、及月初自動回歸
-# 流程：Jitter 啟動 -> 查詢 ScraperAPI 餘額 -> 決定武器 -> 執行任務
+# 本程式碼：src/pod_scra_officer.py v4.6 (S-Plan 自適性偵察加固版)
+# 任務：實作即時 API 餘額偵測、永久模式記憶、及月初優先校準
+# 流程：初始化 -> 月初重置校準 -> 戰術休眠 -> 執行任務 (max 3)
 #---------------------------------------------------------------
 import os, requests, urllib.parse, time, re, urllib3, random
 from supabase import create_client, Client
@@ -12,35 +12,29 @@ from datetime import datetime, timezone
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def get_scraperapi_balance(api_key):
-    """技術用語：即時遙測。直接從 ScraperAPI 帳戶端點獲取最新剩餘點數"""
+    """技術用語：即時遙測。修正解析邏輯，增加容錯性"""
     try:
         res = requests.get(f"https://api.scraperapi.com/account?api_key={api_key}", timeout=10)
         if res.status_code == 200:
             data = res.json()
-            # 剩餘點數 = 總額度 - 已使用
-            return data['request_limit'] - data['request_count']
+            return data.get('requests_available', data.get('request_limit', 78)) 
     except Exception as e:
-        print(f"⚠️ [遙測失敗] 無法獲取 ScraperAPI 餘額: {e}")
-    return 78  # 失敗時回傳安全保守值
+        print(f"⚠️ [遙測失敗]: {e}")
+    return 78
 
 class StrategyManager:
     """戰略管理器：負責雙軌切換、模式持久化及月初自動校準"""
     def __init__(self, supabase: Client, user_mode: str, scra_key: str):
         self.sb = supabase
         self.scra_key = scra_key
-        
-        # 若使用者手動從面板選擇模式，則將該設定寫入 Supabase 實現「永久記憶」
         if user_mode in ["MODE_1", "MODE_2", "AUTO"]:
             self.sb.table("api_budget_control").update({"mode_status": user_mode}).eq("id", "ZENROWS").execute()
-            print(f"💾 [戰略存檔] 當前模式已鎖定為：{user_mode}")
-        
+            print(f"💾 [戰略存檔] 模式設定鎖定為：{user_mode}")
         self.config = self._load_config()
 
     def _load_config(self):
         res = self.sb.table("api_budget_control").select("*").eq("id", "ZENROWS").execute()
         data = res.data[0]
-        
-        # 模式二與自適性校準：每月 1 號強制恢復 1000 點，並回歸 AUTO 模式
         if datetime.now().day == 1 and data['last_reset_date'] != str(datetime.now().date()):
             update_fields = {
                 "balance": 1000, 
@@ -49,45 +43,33 @@ class StrategyManager:
             }
             self.sb.table("api_budget_control").update(update_fields).eq("id", "ZENROWS").execute()
             data.update(update_fields)
-            print("📅 [月初校準] 點數重置完成，戰略回歸 AUTO 模式。")
+            print("📅 [月初校準] 點數已重置，戰略回歸 AUTO 模式。")
         return data
+    
+    #------------------------------------------------
+    # 模式一 & 二：scraperAPI 點數閥值_最低轉換值 (80)
+    #------------------------------------------------
 
     def get_provider(self):
-        # 優先讀取資料庫存檔的模式
         saved_mode = self.config.get("mode_status", "AUTO")
-        
         if saved_mode == "MODE_1": return "SCRAPERAPI"
         if saved_mode == "MODE_2": return "ZENROWS"
-        
-        # 若為 AUTO，則根據 ScraperAPI 即時點數進行自適性切換
         scra_balance = get_scraperapi_balance(self.scra_key)
         print(f"📊 ScraperAPI 即時庫存：{scra_balance} 點")
-        
-        #--------------------------------------------------------
-        # 點換閥值轉換區
-        # 風險提醒：若 ScraperAPI 低於 80 點，自動切換至 ZenRows 備援
-        #--------------------------------------------------------
         if scra_balance < 80:
             return "ZENROWS"
         return "SCRAPERAPI"
 
     def deduct_zenrows(self):
-        # 模擬扣點：根據 ZenRows 規則，Podbay 渲染扣除 25 點
         new_balance = max(0, self.config['balance'] - 25)
         self.sb.table("api_budget_control").update({"balance": new_balance}).eq("id", "ZENROWS").execute()
-        print(f"📉 [扣點] ZenRows 剩餘預估：{new_balance}")
+        print(f"📉 [扣點] ZenRows 預估餘額：{new_balance}")
 
 def run_scra_officer():
-    # 戰術 Jitter：隨機啟動延遲 10~40 分鐘
-    start_delay = random.randint(600, 2400)
-    print(f"🕒 [戰術等待] 啟動隨機休眠 {start_delay//60} 分鐘...")
-    time.sleep(start_delay)
-
     sb_url = os.environ.get("SUPABASE_URL")
     sb_key = os.environ.get("SUPABASE_KEY")
     scra_key = os.environ.get("SCRAP_API_KEY")
     zen_key = os.environ.get("ZENROWS_API_KEY")
-    # 讀取 GitHub 面板輸入
     user_mode = os.environ.get("STRATEGY_MODE", "AUTO")
 
     if not all([sb_url, sb_key, scra_key, zen_key]):
@@ -96,29 +78,32 @@ def run_scra_officer():
 
     supabase: Client = create_client(sb_url, sb_key)
     manager = StrategyManager(supabase, user_mode, scra_key)
-    
-    # 區塊化設計：每次處理不超過 3 筆，維護資源容易
-    missions = supabase.table("mission_queue").select("*").eq("scrape_status", "pending").limit(3).execute()
-    
-    if not missions.data:
-        print("☕ 目前無待處理任務。")
-        return
 
-    for index, target in enumerate(missions.data):
-        # 任務間隨機間隔 3~10 分鐘，模擬真人瀏覽
-        if index > 0:
-            interval = random.randint(180, 600)
-            print(f"⏳ [任務間隔] 休眠 {interval//60} 分鐘...")
-            time.sleep(interval)
+    start_delay = random.randint(600, 2400)
+    print(f"🕒 [戰術等待] 已完成預先校準，啟動隨機休眠 {start_delay//60} 分鐘...")
+    time.sleep(start_delay)
 
+    #--- 定位線區塊 ---#
+    missions = supabase.table("mission_queue").select("*") \
+        .not_.is_("scrape_status", "null") \
+        .eq("scrape_status", "pending") \
+        .limit(3).execute()
+
+    for target in missions.data:
         task_id = target['id']
-        podbay_slug = target.get('podbay_slug') or "bloomberg-businessweek"
-        final_mp3_url = ""
-        
-        # 呼叫自適性判斷
+        podbay_slug = str(target.get('podbay_slug') or "").strip()
+        safe_title = urllib.parse.quote(target.get('episode_title', ''))
+
+        if not podbay_slug or podbay_slug.isdigit():
+            print(f"⚠️ [數據異常] ID {task_id} 的 Slug 無效，跳過。")
+            supabase.table("mission_queue").update({"scrape_status": "manual_check"}).eq("id", task_id).execute()
+            continue
+
+        final_mp3_url = "" 
         provider = manager.get_provider()
         target_page = f"https://podbay.fm/p/{podbay_slug}"
         print(f"🎯 [處理中] {target['episode_title'][:20]}... 採用：{provider}")
+    #--- 定位線結束 ---#
 
         try:
             if provider == "ZENROWS":
@@ -145,11 +130,12 @@ def run_scra_officer():
                 update_data = {
                     "audio_url": final_mp3_url,
                     "scrape_status": "success",
+                    "used_provider": provider, 
                     "status": "pending",
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }
                 supabase.table("mission_queue").update(update_data).eq("id", task_id).execute()
-                print(f"✅ [入庫成功] 門票發放。")
+                print(f"✅ [入庫成功] 門票發放成功。")
             except Exception as e:
                 print(f"❌ [寫入失敗]：{str(e)}")
 
