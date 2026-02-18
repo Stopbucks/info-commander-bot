@@ -8,7 +8,7 @@
 import os, requests, time, random, boto3, io
 from supabase import create_client, Client
 from datetime import datetime
-from pod_scra_ai_agent import AIAgent  # 🚀 引入智囊團模組
+from podcast_ai_agent import AIAgent   # 🚀 引入智囊團模組
 
 def run_transport_and_report():
     # 1. 讀取補給金鑰
