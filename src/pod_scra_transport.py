@@ -38,33 +38,36 @@ def run_transport_and_report():
         .eq("status", "pending") \
         .limit(1) \
         .execute()
-    
+
     if not missions.data:
         print("☕ [待命] 倉庫暫無待搬運物資。")
         return
 
+    # A. 先提取任務內容 (這樣下方才能使用 source_name)
     mission = missions.data[0]
+    source_name = mission.get('source_name', 'unknown') # 🚀 必須先定義
     audio_url = mission.get('audio_url')
-    source_name = mission.get('source_name', 'unknown')
     episode_title = mission.get('episode_title', 'Untitled')
+    provider_info = mission.get('used_provider', 'Legacy/Unknown')
+
+    # B. 再定義本地檔案與 R2 檔名
     local_file = "temp_scout.mp3"
     r2_file_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{source_name}.mp3"
 
     try:
-        # 一行註解：搬運工 Jitter。下載前隨機休眠 5~15 秒，降低 CDN 偵測風險。
+        # 🚀 搬運工 Jitter
         jitter_sleep = random.randint(5, 15)
-        print(f"🕒 [偽裝休眠] 準備搬運，等待 {jitter_sleep} 秒...")
+        print(f"🕒 [偽裝休眠] 準備從 {provider_info} 提供的網址搬運，等待 {jitter_sleep} 秒...")
         time.sleep(jitter_sleep)
 
-        # 3. 下載至 GitHub Runner 本機
-        print(f"📥 [下載中] 正在從來源搬運音檔：{source_name}...")
-        # 一行註解：增加流式下載處理，避免大檔案造成記憶體溢位。
+        # 3. 下載至 GitHub Runner 本機 (流式下載)
+        print(f"📥 [下載中] 正在下載由 {provider_info} 偵得的音檔：{source_name}...")
         with requests.get(audio_url, stream=True, timeout=300) as r:
             r.raise_for_status()
             with open(local_file, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
-        
+  
         if os.path.exists(local_file):
             # 4. 上傳至 R2
             print(f"🚀 [運輸中] 正在將檔案推向 R2 倉庫：{r2_file_name}")

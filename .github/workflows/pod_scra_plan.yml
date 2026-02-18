@@ -1,5 +1,6 @@
 ##########################################################################
 # 🏃 S-Plan 4.0 全鏈條接力 - 戰略資源自動重設版
+# scraper & zenrows 固定每月1日喚醒進行恢復點數，其餘周一~五 03:00 執行任務
 ##########################################################################
 
 name: 🏃 S-Plan podcast
@@ -57,12 +58,19 @@ jobs:
         echo "📡 [啟動] 解碼官執行任務，當前戰略模式: $STRATEGY_MODE"
         python src/pod_scra_officer.py
 
-#--- (定位線) 以下為運輸兵步驟，同樣需確保超時設定足夠 ---#
+#--- 定位線：在「🚚 執行運輸與 AI 摘要任務」區塊 ---#
     - name: 🚚 執行運輸與 AI 摘要任務
       timeout-minutes: 60
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        # ... (其餘 Secrets 保持不變)
+        R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+        R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        PYTHONUNBUFFERED: 1
       run: |
         python src/pod_scra_transport.py
+# -----(定位線)以上為補全內容----
