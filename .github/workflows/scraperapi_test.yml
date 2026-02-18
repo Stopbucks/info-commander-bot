@@ -47,7 +47,8 @@ jobs:
       run: sleep 10
 
 
-#--- 確保此區塊位於 steps: 下方並正確縮進 ---#
+#--- 定位線：接續在「戰術冷卻」步驟之後 ---#
+
     - name: 🚚 執行運輸與 AI 摘要任務
       timeout-minutes: 20
       env:
@@ -56,7 +57,6 @@ jobs:
         R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
         R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-        # 🚀 帶入 AI 金鑰與通訊官憑證
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -65,3 +65,5 @@ jobs:
       run: |
         echo "🚚 [啟動] 運輸兵執行入庫並呼叫智囊團..."
         python src/pod_scra_transport.py
+
+#-----(定位線)以上修改-----
