@@ -57,8 +57,11 @@ jobs:
       run: |
         echo "📡 [啟動] 解碼官執行任務，當前戰略模式: $STRATEGY_MODE"
         python src/pod_scra_officer.py
+    #--- 執行運輸兵任務之前先等待 ---#
+    - name: 🕒 戰術觀察期 (等待解碼官產出)
+      run: sleep 560  # 強制等待約 8 分鐘，確保解碼官完成寫入
 
-#--- 定位線：在「🚚 執行運輸與 AI 摘要任務」區塊 ---#
+    #--- 「🚚 執行運輸與 AI 摘要任務」區塊 ---#
     - name: 🚚 執行運輸與 AI 摘要任務
       timeout-minutes: 60
       env:
