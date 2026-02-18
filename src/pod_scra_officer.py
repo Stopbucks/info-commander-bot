@@ -65,25 +65,24 @@ def run_scra_officer():
         except Exception as e:
             print(f"⚠️ [偵察異常]：{str(e)}")
 
-        # --- 最終結算 ---
         if final_mp3_url:
-            # 💡 加固：同時更新 audio_url 與 podbay_url，徹底解決運輸兵抓不到資料的問題
-            update_data = {
-                "podbay_url": final_mp3_url,
-                "audio_url": final_mp3_url,
-                "scrape_status": "success",
-                "status": "pending", 
-                "created_at": datetime.now(timezone.utc).isoformat() 
-            }
-            supabase.table("mission_queue").update(update_data).eq("id", task_id).execute()
-            print(f"✅ [入庫成功] 門票發放：{final_mp3_url[:60]}...")
-        else:
-            # 若失敗則標記，避免重複浪費點數
-            supabase.table("mission_queue").update({
-                "scrape_status": "failed",
-                "status": "failed"
-            }).eq("id", task_id).execute()
-            print(f"❌ [任務失敗] 無法獲取 MP3 連結。")
-
+            try:
+                update_data = {
+                    "audio_url": final_mp3_url,
+                    "podbay_url": final_mp3_url,
+                    "scrape_status": "success",
+                    "status": "pending", 
+                    "created_at": datetime.now(timezone.utc).isoformat() 
+                }
+                # 一行註解：嘗試更新，若觸發 UNIQUE 限制則由 except 捕捉。
+                supabase.table("mission_queue").update(update_data).eq("id", task_id).execute()
+                print(f"✅ [入庫成功] 門票發放：{final_mp3_url[:60]}...")
+            except Exception as e:
+                # 一行註解：針對 23505 (重複值) 進行專門處理，不崩潰，僅跳過。
+                if "23505" in str(e):
+                    print(f"⚠️ [跳過] 偵測到重複網址，該門票已由其他偵查兵領取。")
+                else:
+                    print(f"❌ [寫入異常]：{str(e)}")
+ 
 if __name__ == "__main__":
     run_scra_officer()
