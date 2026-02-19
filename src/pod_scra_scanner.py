@@ -32,6 +32,17 @@ def fetch_html(provider_key, target_url, keys):
             api_url = f"https://api.scrape.do?token={keys['SCRAPEDO']}&url={encoded_url}&render=true"
             return requests.get(api_url, timeout=60)
 
+            #---  增加 HasData 採用 Header 帶入 Key，每次成功抓取需 10 點。 ---#
+        elif provider_key == "HASDATA":
+            # 💡 戰報：備援破城槌，每日 100 點
+            headers = {'x-api-key': keys['HASDATA']}
+            params = {
+                'url': target_url,
+                'js_render': 'true',      # 必開，以應對 Podbay
+                'proxy_type': 'datacenter' # 使用 DC 代理以節省點數
+            }
+            return requests.get('https://api.hasdata.com/scrape', headers=headers, params=params, timeout=60)
+# -----(定位線)以上修改----
         return None
     except Exception as e:
         print(f"⚠️ [Scanner 異常] {provider_key} 連線失敗: {e}")
