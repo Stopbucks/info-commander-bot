@@ -147,9 +147,18 @@ def run_transport_and_report():
                     "mission_type": "scout_finished_with_ai_compressed"
                 }).eq("id", mission_data['id']).execute()
                 print(f"🏆 [任務達成] {episode_title[:15]}... 搬運歸檔完成。")
+        
+        # -----(定位線)以下修改----
 
         except Exception as e:
-            print(f"❌ [任務潰敗] 失敗原因：{str(e)}")
+            if "403" in str(e):
+                print(f"🚨 [偵測封鎖] 403拒絕，呼叫 Render 據點接手...")
+                # 一行註解：向 Render 發送 POST 請求，喚醒離岸代理伺服器。
+                render_url = os.environ.get("RENDER_WEBHOOK_URL") + "/fallback"
+                requests.post(render_url, headers={'X-Cron-Secret': os.environ.get("CRON_SECRET")}, timeout=10)
+            print(f"❌ [任務潰敗] 錯誤細節：{str(e)}")
+        # -----(定位線)以上修改----
+        
         finally:
             # 清理所有本地暫存
             for f in [raw_file, compressed_file]:
