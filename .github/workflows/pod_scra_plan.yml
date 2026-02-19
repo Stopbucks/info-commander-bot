@@ -2,16 +2,12 @@
 # 🏃 S-Plan 4.0 全鏈條接力 - 戰略資源自動重設版
 # scraper & zenrows 固定每月1日喚醒進行恢復點數，其餘周一~五 03:00 執行任務
 ##########################################################################
-
 name: 🏃 S-Plan podcast
 
 on:
   schedule:
-    # 戰術排程一：週一至週五凌晨 03:00 (UTC 19:00) 執行例行任務
-    - cron: '0 19 * * 1-5'
-    # 戰術排程二：每月 1 日凌晨 03:00 (UTC 19:00) 強制喚醒，確保點數重置 (不論是否為週末)
-    - cron: '0 19 1 * *'
-  
+    - cron: '0 19 * * 1-5' # 週一至週五 03:00 (台北時間)
+    - cron: '0 19 1 * *'    # 每月 1 日凌晨 03:00 喚醒
   workflow_dispatch:
     inputs:
       force_mode:
@@ -19,17 +15,31 @@ on:
         required: true
         default: 'AUTO'
         type: choice
-        options:
-        - AUTO
-        - MODE_1
-        - MODE_2
+        options: [AUTO, MODE_1, MODE_2]
 
 jobs:
   relay_mission:
     runs-on: ubuntu-latest
-    # 一行註解：將超時延長至 180 分鐘，確保包含 Jitter 與任務間隔的高壓環境能安全完成。
     timeout-minutes: 180 
-    
+
+    # 🚀 集中定義 Job 級別 env (下方所有 steps 都會自動繼承)
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2_secret: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
+      ZENROWS_API_KEY: ${{ secrets.ZENROWS_API_KEY }}
+      WEBSCRAP_API_KEY: ${{ secrets.WEBSCRAP_API_KEY }}
+      SCRAPEDO_API_KEY: ${{ secrets.SCRAPEDO_API_KEY }}
+      PYTHONUNBUFFERED: 1
+
     steps:
     - name: 📦 檢出程式碼
       uses: actions/checkout@v4
@@ -40,40 +50,27 @@ jobs:
         python-version: '3.12'
         cache: 'pip'
 
-    - name: ⚙️ 安裝必要依賴
+    - name: ⚙️ 安裝必要依賴與 FFmpeg
+      # 一行註解：安裝音訊壓縮所需工具 ffmpeg。
       run: |
+        sudo apt-get update && sudo apt-get install -y ffmpeg
         python -m pip install --upgrade pip
         pip install requests beautifulsoup4 supabase python-dotenv boto3 google-generativeai groq
-        
+
     - name: 🎯 執行解碼任務 (Officer)
+      # 一行註解：僅保留此步驟特有的戰略切換變數。
       env:
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
-        ZENROWS_API_KEY: ${{ secrets.ZENROWS_API_KEY }}
-        # 一行註解：處理手動觸發(inputs)與自動排程(schedule)的變數對位。
         STRATEGY_MODE: ${{ github.event.inputs.force_mode || 'AUTO' }}
-        PYTHONUNBUFFERED: 1
       run: |
         echo "📡 [啟動] 解碼官執行任務，當前戰略模式: $STRATEGY_MODE"
         python src/pod_scra_officer.py
-    #--- 執行運輸兵任務之前先等待 ---#
-    - name: 🕒 戰術觀察期 (等待解碼官產出)
-      run: sleep 560  # 強制等待約 8 分鐘，確保解碼官完成寫入
 
-    #--- 「🚚 執行運輸與 AI 摘要任務」區塊 ---#
-    - name: 🚚 執行運輸與 AI 摘要任務
-      timeout-minutes: 60
-      env:
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-        R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        PYTHONUNBUFFERED: 1
-      run: |
-        python src/pod_scra_transport.py
-# -----(定位線)以上為補全內容----
+    - name: 🕒 戰術觀察期 (等待解碼官完成物資入庫)
+      run: sleep 300 
+
+    - name: 🚚 執行運輸、音訊壓縮與 AI 摘要
+      run: python src/pod_scra_transport.py
+
+    - name: 🧹 執行兩階段庫存重生與清理
+      # 一行註解：在最後階段清理或重生 7/14 天前的任務。
+      run: python src/pod_scra_cleaner.py
