@@ -30,20 +30,22 @@ jobs:
 
     # 🚀 集中定義 Job 級別 env (下方所有 steps 都會自動繼承)
     env:
+
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      r2_secret: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }} # 🚀 修正：對位法定清單
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
+      
       SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
       ZENROWS_API_KEY: ${{ secrets.ZENROWS_API_KEY }}
-      WEBSCRAP_API_KEY: ${{ secrets.WEBSCRAP_API_KEY }}
-      SCRAPEDO_API_KEY: ${{ secrets.SCRAPEDO_API_KEY }}
+      WEBSCRAP_API_KEY: ${{ secrets.WEBSCRAP_API_KEY }} # 🚀 修正：對位法定清單
+      SCRAPEDO_API_KEY: ${{ secrets.SCRAPEDO_API_KEY }} # 🚀 修正：對位法定清單
+
       PYTHONUNBUFFERED: 1
 
     steps:
