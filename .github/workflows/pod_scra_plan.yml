@@ -8,14 +8,20 @@ on:
   schedule:
     - cron: '0 19 * * 1-5' # 週一至週五 03:00 (台北時間)
     - cron: '0 19 1 * *'    # 每月 1 日凌晨 03:00 喚醒
+
   workflow_dispatch:
     inputs:
       force_mode:
-        description: '🚀 戰略模式切換 (AUTO / MODE_1 / MODE_2)'
+        description: '🚀 選擇作戰模式 (AUTO 為自動決策)'
         required: true
         default: 'AUTO'
         type: choice
-        options: [AUTO, MODE_1, MODE_2]
+        options: 
+          - AUTO
+          - MODE_1_Scrapi
+          - MODE_2_Zenrows
+          - MODE_3_Webscrap
+          - MODE_4_Scrapedo
 
 jobs:
   relay_mission:
