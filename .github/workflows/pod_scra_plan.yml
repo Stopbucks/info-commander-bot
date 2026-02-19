@@ -36,7 +36,8 @@ jobs:
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }} # 🚀 修正：對位法定清單
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }} # 🚀 補齊：倉庫路徑    
+        
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -46,6 +47,9 @@ jobs:
       WEBSCRAP_API_KEY: ${{ secrets.WEBSCRAP_API_KEY }} # 🚀 修正：對位法定清單
       SCRAPEDO_API_KEY: ${{ secrets.SCRAPEDO_API_KEY }} # 🚀 修正：對位法定清單
 
+# 🚀 補齊：接力通訊組件 (若無此二項，Render 無法被喚醒)
+      RENDER_WEBHOOK_URL: ${{ secrets.RENDER_WEBHOOK_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
       PYTHONUNBUFFERED: 1
 
     steps:
