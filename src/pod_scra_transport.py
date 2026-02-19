@@ -1,40 +1,105 @@
 
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_transport.py v0.91 (法定標籤校準版)
-# 任務：領取 3新 + 2舊 任務 -> FFmpeg 壓縮 -> 搬運與 AI 摘要
-# 修正：精準對位 GitHub Secrets 標籤 R2_SECRET_ACCESS_KEY
+# 本程式碼：src/pod_scra_transport.py v1.0 (戰術輪替模組化版)
+# 任務：3新+2舊任務、Opus壓縮、AI摘要、48H自動輪替調度
 # ---------------------------------------------------------
 
 import os, requests, time, random, boto3, subprocess
 from supabase import create_client, Client
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from podcast_ai_agent import AIAgent 
 
+# --- 區塊一：戰術核心模組 (Tactics Core) ---
+def get_tactics(supabase: Client):
+    # 一行註解：從戰術板讀取唯一的執勤派令。
+    res = supabase.table("pod_scra_tactics").select("*").eq("id", 1).execute()
+    return res.data[0] if res.data else None
+
+
+def update_active_worker(supabase: Client, next_worker: str, status_msg: str, is_hard_block: bool = False):
+    # 一行註解：更新資料庫狀態，切換值星官並紀錄錯誤。
+    update_data = {
+        "active_worker": next_worker,
+        "duty_start_at": datetime.now(timezone.utc).isoformat(),
+        "last_error_type": status_msg,
+        "consecutive_soft_failures": 0 # 換班時重置軟失敗計數
+    }
+    if is_hard_block: update_data["github_status"] = "BLOCKED"
+    supabase.table("pod_scra_tactics").update(update_data).eq("id", 1).execute()
+
+
+def handle_failure_logic(supabase: Client, tactics: dict, error: Exception):
+    # 一行註解：分級處理失敗，403立即換班，其餘累加失敗次數。
+    err_str = str(error)
+    if "403" in err_str:
+        print(f"🚨 [硬斷路] 偵測到 403 封鎖，立即移交 Render 據點...")
+        update_active_worker(supabase, "RENDER", "403_BLOCK", is_hard_block=True)
+        trigger_render_webhook()
+    else:
+        new_soft_count = tactics.get('consecutive_soft_failures', 0) + 1
+        print(f"⚠️ [軟失敗] 次數：{new_soft_count}/{tactics['soft_failure_threshold']}")
+        supabase.table("pod_scra_tactics").update({"consecutive_soft_failures": new_soft_count}).eq("id", 1).execute()
+        if new_soft_count >= tactics['soft_failure_threshold']:
+            print("🛑 [閾值觸發] 連續軟失敗過多，強制換班...")
+            update_active_worker(supabase, "RENDER", "SOFT_FAILURE_LIMIT")
+            trigger_render_webhook() # 一行註解：在軟失敗達標強制換班後，亦同步喚醒 Render 據點。
+
+
+def trigger_render_webhook():
+    # 呼叫遠端據點前進行隨機等待，避免多個程序同時競爭 Render 資源。
+    wait_time = random.randint(10, 30)
+    print(f"⏳ [通訊防護] 避開競爭呼叫，隨機等待 {wait_time} 秒後發送訊號...")
+    time.sleep(wait_time)
+    # 一行註解：發送 Webhook 喚醒 Render 據點接手任務。
+    url = os.environ.get("RENDER_WEBHOOK_URL") + "/fallback"
+    #requests.post(url, headers={'X-Cron-Secret': os.environ.get("CRON_SECRET")}, timeout=10)
+
+    try:
+        # 一行註解：發送帶有超時保護的 Webhook，確保不會因為 Render 反應慢而卡死。
+        res = requests.post(
+            url, 
+            headers={'X-Cron-Secret': os.environ.get("CRON_SECRET")}, 
+            timeout=15
+        )
+        print(f"📡 [呼叫結果] 狀態碼：{res.status_code}")
+    except Exception as e:
+        print(f"⚠️ [呼叫異常] 無法聯繫 Render 據點：{e}")
+
+# --- 區塊二：主邏輯控制流 (Main Flow) ---
 def run_transport_and_report():
-    # 1. 讀取補給金鑰 (根據法定清單校準)
-    sb_url = os.environ.get("SUPABASE_URL")
-    sb_key = os.environ.get("SUPABASE_KEY")
-    r2_id = os.environ.get("R2_ACCESS_KEY_ID")
-    # 🚀 修正：對位法定清單中的名稱 (原為 r2_secret，導致 LOG 報錯)
-    r2_secret = os.environ.get("R2_SECRET_ACCESS_KEY") 
-    r2_account_id = os.environ.get("R2_ACCOUNT_ID")
-    r2_bucket = os.environ.get("R2_BUCKET_NAME", "pod-scra-vault") # 優先使用 Secret 定義
+    # 1. 補給金鑰初始化
+    sb_url, sb_key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY")
+    r2_id, r2_secret = os.environ.get("R2_ACCESS_KEY_ID"), os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_acc, r2_bucket = os.environ.get("R2_ACCOUNT_ID"), os.environ.get("R2_BUCKET_NAME", "pod-scra-vault")
     
-    # 2. 安全性檢查：確保所有傳輸通道皆有動力
-    if not all([sb_url, sb_key, r2_id, r2_secret, r2_account_id]):
-        print(f"❌ [傳輸兵] 環境變數不齊全。檢查結果: ID:{bool(r2_id)}, Secret:{bool(r2_secret)}, Account:{bool(r2_account_id)}")
+    if not all([sb_url, sb_key, r2_id, r2_secret, r2_acc]): return
+    
+    supabase: Client = create_client(sb_url, sb_key)
+    tactics = get_tactics(supabase)
+    if not tactics: return
+
+    # --- 定位線：戰術檢查區塊 ---
+    now = datetime.now(timezone.utc)
+    duty_start = datetime.fromisoformat(tactics['duty_start_at'].replace('Z', '+00:00'))
+    
+    # 🚀 檢查 A：是否已到 48H 輪替時間？
+    if tactics['active_worker'] == 'GITHUB' and now > duty_start + timedelta(hours=tactics['rotation_hours']):
+        print("⏰ [戰術輪替] 48小時執勤結束，交棒 Render...")
+        update_active_worker(supabase, "RENDER", "ROTATION_SCHEDULE")
+        trigger_render_webhook()
         return
 
-    # 初始化組件
-    supabase: Client = create_client(sb_url, sb_key)
-    ai_agent = AIAgent() 
-    s3_client = boto3.client(
-        's3',
-        endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
-        aws_access_key_id=r2_id,
-        aws_secret_access_key=r2_secret, 
-        region_name='auto' # 🚀 增加：明確指定 region 提高連線成功率
-    )
+    # 🚀 檢查 B：目前是否由 GitHub 執勤？
+    if tactics['active_worker'] != 'GITHUB':
+        print(f"📡 [轉向] 目前由 {tactics['active_worker']} 執勤，發送喚醒信號並待命。")
+        if tactics['active_worker'] == 'RENDER': trigger_render_webhook()
+        return
+
+    # 2. 初始化傳輸組件
+    ai_agent = AIAgent()
+    s3_client = boto3.client('s3', endpoint_url=f'https://{r2_acc}.r2.cloudflarestorage.com',
+                             aws_access_key_id=r2_id, aws_secret_access_key=r2_secret, region_name='auto')
+
 
     # --- 區塊：3新 + 2舊 混編領取邏輯 (不變，維持優良戰術) ---
     new_m = supabase.table("mission_queue").select("*") \
@@ -57,6 +122,7 @@ def run_transport_and_report():
 
     print(f"📦 [裝載] 混合領取完成：新物資 {len(new_m.data)} 筆，舊物資 {len(old_m.data)} 筆。")
 
+    
     # 🚀 啟動多任務處理流水線
     for index, mission_data in enumerate(all_missions):
         # A. 任務間大抖動 (保持穩定性)
@@ -147,17 +213,12 @@ def run_transport_and_report():
                     "mission_type": "scout_finished_with_ai_compressed"
                 }).eq("id", mission_data['id']).execute()
                 print(f"🏆 [任務達成] {episode_title[:15]}... 搬運歸檔完成。")
-        
-        # -----(定位線)以下修改----
+                supabase.table("pod_scra_tactics").update({"consecutive_soft_failures": 0}).eq("id", 1).execute()
 
         except Exception as e:
-            if "403" in str(e):
-                print(f"🚨 [偵測封鎖] 403拒絕，呼叫 Render 據點接手...")
-                # 一行註解：向 Render 發送 POST 請求，喚醒離岸代理伺服器。
-                render_url = os.environ.get("RENDER_WEBHOOK_URL") + "/fallback"
-                requests.post(render_url, headers={'X-Cron-Secret': os.environ.get("CRON_SECRET")}, timeout=10)
-            print(f"❌ [任務潰敗] 錯誤細節：{str(e)}")
-        # -----(定位線)以上修改----
+            # 一行註解：交由戰術失敗模組判定處理方式。
+            handle_failure_logic(supabase, tactics, e)
+            break # 發生異常時停止本次 GitHub 流程
         
         finally:
             # 清理所有本地暫存
