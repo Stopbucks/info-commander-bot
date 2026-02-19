@@ -17,10 +17,16 @@ def fetch_html(provider_key, target_url, keys):
             return requests.get('https://api.scraperapi.com', params=params, timeout=60)
             
         elif provider_key == "ZENROWS":
-            # 💡 戰報：目前主戰力，試用至 3/3。
-            params = {'api_key': keys['ZENROWS'], 'url': target_url, 'js_render': 'true'}
+            # 一行註解：修正參數標籤為 apikey 並加入 premium_proxy 以確保穿透 Podbay 防線。
+            params = {
+                'apikey': keys['ZENROWS'], 
+                'url': target_url, 
+                'js_render': 'true',
+                'premium_proxy': 'true' # 🚀 增加：Podbay 具備高階防護，需動用優質代理。
+            }
+            # 使用 requests 執行帶有正確參數的偵察請求。
             return requests.get('https://api.zenrows.com/v1/', params=params, timeout=60)
-            
+
         elif provider_key == "WEBSCRAPING":
             # 💡 戰報：日後模式二優先，每月 2,000 點
             params = {'api_key': keys['WEBSCRAP'], 'url': target_url, 'js': 'true', 'proxy': 'datacenter'}
