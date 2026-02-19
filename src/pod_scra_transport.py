@@ -79,26 +79,43 @@ def run_transport_and_report():
         r2_file_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{source_name}.opus"
 
         try:
-            # 🚀 搬運工隨機等待
-            jitter_sleep = random.randint(5, 15)
-            print(f"🕒 [偽裝休眠] 正在搬運來自 {provider_info} 的物資，等待 {jitter_sleep} 秒...")
-            time.sleep(jitter_sleep)
+            #--- 定位線 以下修改下載與預熱區塊 ---#
+            # 🚀 1. 預熱瀏覽：隨機選取高權重網站
+            warmup_target = random.choice(["https://www.apple.com/apple-podcasts/", "https://www.google.com/"])
+            print(f"📡 [預熱] 正在進行前置瀏覽：{warmup_target}")
+            session = requests.Session()
+            session.get(warmup_target, timeout=20)
+            
+            # 🚀 2. 深度 Jitter (5-10 分鐘)
+            deep_jitter = random.randint(300, 600)
+            print(f"🕒 [擬態休眠] 深度偽裝中，等待 {deep_jitter//60} 分鐘...")
+            time.sleep(deep_jitter)
 
-            # 3. 流式下載處理
-            print(f"📥 [下載中] 正在獲取：{source_name}...")
-            with requests.get(audio_url, stream=True, timeout=300) as r:
+            # 🚀 3. 流式下載處理 (全套擬態標頭)
+            print(f"📥 [下載中] 正在獲取物資：{source_name}...")
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Referer': 'https://podbay.fm/',
+                'Accept': 'audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,application/ogg;q=0.7,video/*;q=0.6,*/*;q=0.5',
+                'Accept-Language': 'en-US,en;q=0.9',
+            }
+            
+            # 一行註解：確保使用 session 與全套 headers 進行偽裝下載。
+            with session.get(audio_url, stream=True, timeout=300, headers=headers) as r:
                 r.raise_for_status()
                 with open(raw_file, "wb") as f:
                     for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
             
             # --- 核心：FFmpeg 壓縮技術 (16K/Mono/Opus) ---
             print(f"🗜️ [壓縮中] 執行高效率轉碼...")
-            # 一行註解：降採樣並轉為單聲道 Opus，極大化節省 R2 空間。
+            # 一行註解：將音檔轉為 16kHz 單聲道 Opus 格式。
             subprocess.run([
                 'ffmpeg', '-y', '-i', raw_file,
                 '-ar', '16000', '-ac', '1', '-c:a', 'libopus', '-b:a', '24k',
                 compressed_file
             ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # ... 接下來是推向 R2 與 AI 分析的邏輯  ...
 
             if os.path.exists(compressed_file):
                 # 4. 推向 R2
