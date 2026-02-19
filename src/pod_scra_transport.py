@@ -101,18 +101,18 @@ def run_transport_and_report():
                              aws_access_key_id=r2_id, aws_secret_access_key=r2_secret, region_name='auto')
 
 
-    # --- 區塊：3新 + 2舊 混編領取邏輯 (不變，維持優良戰術) ---
+    # --- 區塊：3新 + 2舊 混編領取邏輯 (不變，維持優良戰術) ---#02/20測試期間改2新1舊
     new_m = supabase.table("mission_queue").select("*") \
         .filter("status", "eq", "pending") \
         .or_("scrape_status.eq.success,scrape_status.eq.manual_check") \
-        .order("created_at", desc=True).limit(3).execute()
+        .order("created_at", desc=True).limit(2).execute()
     
     picked_ids = [m['id'] for m in new_m.data]
     old_m = supabase.table("mission_queue").select("*") \
         .filter("status", "eq", "pending") \
         .or_("scrape_status.eq.success,scrape_status.eq.manual_check") \
         .not_.in_("id", picked_ids) \
-        .order("created_at", desc=False).limit(2).execute()
+        .order("created_at", desc=False).limit(1).execute()
 
     all_missions = new_m.data + old_m.data
     
