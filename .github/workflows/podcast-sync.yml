@@ -106,38 +106,38 @@ jobs:
 #---[區塊 C]：條件式預熱前面程式碼相同---#
 # -----(定位線)以下修改----
     - name: ⏳ 雙機聯動深度預熱 (Fly.io Dual-Node Warmup)
-      if: env.NEED_WARP == 'false'
+      # 💡 修正：路徑 A (FlyJP) 或 路徑 C (FlyLA) 都要進來預熱
+      if: contains(fromJSON('["A", "C"]'), env.PATH_ID)
       run: |
-        echo "🚀 啟動雙節點喚醒程序，目標：LAX (美國) 與 NRT (日本)"
+        echo "🚀 今日路徑 ID 為 ${{ env.PATH_ID }}，啟動專屬代理喚醒程序..."
         
-        # 進行最多 10 次循環，總時長約 200 秒
-        for i in {1..10}; do
+        # 使用 GitHub Action 的 env 上下文重新賦值，避免 Bash 子進程空值
+        TARGET_PATH="${{ env.PATH_ID }}"
+        
+        for i in {1..20}; do
           echo "📡 第 $i 次喚醒嘗試 (Dual-Probe)..."
           
-          # 同時踢醒兩台機器 (不論結果，先發信號)
+          # 無差別踢醒雙機，確保影子身分也能隨時切換 [cite: 2026-02-15]
           curl -I -m 5 --proxy "${{ secrets.FLY_PROXY_LA }}" https://www.google.com > /dev/null 2>&1 || true
           curl -I -m 5 --proxy "${{ secrets.FLY_PROXY_JP }}" https://www.google.com > /dev/null 2>&1 || true
           
-          # 驗證今日目標路徑是否已經就緒
-          # 💡 這裡會根據 triage 步驟得到的 PATH_ID 動態決定檢查哪一邊
+          # 根據今日 PATH_ID 決定檢查哪個節點
           CHECK_PROXY=""
-          if [[ "${{ env.PATH_ID }}" == "C" ]]; then CHECK_PROXY="${{ secrets.FLY_PROXY_LA }}"; fi
-          if [[ "${{ env.PATH_ID }}" == "E" ]]; then CHECK_PROXY="${{ secrets.FLY_PROXY_JP }}"; fi
+          if [[ "$TARGET_PATH" == "C" ]]; then CHECK_PROXY="${{ secrets.FLY_PROXY_LA }}"; fi
+          if [[ "$TARGET_PATH" == "A" ]]; then CHECK_PROXY="${{ secrets.FLY_PROXY_JP }}"; fi
           
-          # 如果成功透過代理連線，則提早結束等待
           if [ -n "$CHECK_PROXY" ] && curl -I -m 10 --proxy "$CHECK_PROXY" https://www.google.com > /dev/null 2>&1; then
-            echo "✅ 目標節點 ${{ env.PATH_ID }} 已成功就緒！"
-            break
+            echo "✅ 今日主節點 $TARGET_PATH 已成功就緒！"
+            exit 0
           fi
           
-          if [ $i -eq 10 ]; then
-            echo "⚠️ 已達到 200 秒上限，任務將在不穩定狀態下啟動。"
-          else
-            echo "💤 節點啟動中，等待 20 秒後進行下一輪掃描..."
-            sleep 20
-          fi
+          echo "💤 節點啟動中，等待 20 秒後再次偵測..."
+          sleep 20
         done
-#---下一步就是執行任務---#
+        
+        echo "❌ [安全熔斷] 代理節點 $TARGET_PATH 在 200 秒內無法就緒，終止任務以保護帳號安全。"
+        exit 1
+#---下一步執行任務---#
 
     - name: 🚀 執行任務 (Run Info Commander)
       env:
