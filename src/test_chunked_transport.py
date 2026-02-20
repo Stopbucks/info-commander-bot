@@ -128,7 +128,7 @@ def run_full_cycle_test():
         return
 
     # 動態計算分段，確保總請求 <= 20 次，單次約 3-4MB。(目前3.7MB)
-    chunk_size = max(3.7 * 1024 * 1024, math.ceil(total_size / 20))
+    chunk_size = max(3.8 * 1024 * 1024, math.ceil(total_size / 20))
     num_chunks = math.ceil(total_size / chunk_size)
     if not os.path.exists('parts'): os.makedirs('parts')
 
