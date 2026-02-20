@@ -94,10 +94,16 @@ def run_full_cycle_test():
 
     # 🚀 4. 序列化擬態搬運
     for i in range(num_chunks):
-        if i > 0: time.sleep(random.uniform(5.5, 12.5)) # 擬態緩衝抖動
-        
+        if i > 0:
+            # 一行註解：針對 3.5MB 以上的大片段，給予更長的伺服器「喘息時間」。
+            jitter = random.uniform(8.5, 16.2) 
+            print(f"🕒 [擬態緩衝] 正在進行大片段冷卻，等待 {jitter:.2f} 秒...")
+            time.sleep(jitter)
+
         start = i * chunk_size
         end = min(start + chunk_size - 1, total_size - 1)
+
+
         chunk_data = fetch_chunk_via_proxy(target_url, start, end, scra_key)
         
         if chunk_data:
