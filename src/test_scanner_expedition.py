@@ -36,8 +36,25 @@ def extract_audio_url_v25(html_content):
 
 # --- [主演習程序] ---
 def run_expedition_test():
-    # ... (環境變數初始化維持原樣) ...
-    # 一行註解：領取待命任務。
+
+    # 1. 取得演習指令
+    test_mode = os.environ.get("TEST_PROVIDER_MODE", "ZENROWS")
+    target_site = os.environ.get("TEST_SITE_TARGET", "PODBAY")
+    
+    sb_url = os.environ.get("SUPABASE_URL")
+    sb_key = os.environ.get("SUPABASE_KEY")
+    all_keys = {
+        "SCRAPERAPI": os.environ.get("SCRAP_API_KEY"),
+        "ZENROWS": os.environ.get("ZENROWS_API_KEY"),
+        "WEBSCRAP": os.environ.get("WEBSCRAP_API_KEY"),
+        "SCRAPEDO": os.environ.get("SCRAPEDO_API_KEY"),
+        "HASDATA": os.environ.get("HASDATA_API_KEY")
+    }
+
+    # 🚀 關鍵修正線：重新建立與資料庫的通訊鏈路
+    supabase: Client = create_client(sb_url, sb_key)
+
+    # 領取 3 筆待處理任務
     res = supabase.table("mission_queue").select("*").eq("scrape_status", "pending").limit(3).execute()
     
     if not res.data:
