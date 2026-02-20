@@ -135,21 +135,33 @@ def run_scra_officer():
                 if not final_mp3_url:
                     mp3_link = soup.find('a', href=re.compile(r'\.mp3'))
                     final_mp3_url = mp3_link['href'] if mp3_link else None
-
+                #---------修改定位線-------------
+                #--- 4. 物資入庫 前面程式碼相同 ---# 
                 if final_mp3_url:
-                    # 4. 物資入庫
-                    update_data = {
-                        "audio_url": final_mp3_url,
-                        "scrape_status": "success",
-                        "used_provider": provider, 
-                        "status": "pending",
-                        "created_at": datetime.now(timezone.utc).isoformat()
-                    }
-                    supabase.table("mission_queue").update(update_data).eq("id", task_id).execute()
-                    print(f"✅ [成功] 物資已入庫，標籤為：{provider}")
+                    try:
+                        # 一行註解：嘗試將挖掘到的網址回填資料庫，並將偵察狀態更新為成功。
+                        update_data = {
+                            "audio_url": final_mp3_url,
+                            "scrape_status": "success",
+                            "used_provider": provider, 
+                            "status": "pending",
+                            "created_at": datetime.now(timezone.utc).isoformat()
+                        }
+                        supabase.table("mission_queue").update(update_data).eq("id", task_id).execute()
+                        print(f"✅ [成功] 物資已入庫，標籤為：{provider}")
+                    except Exception as db_e:
+                        # 偵測到 SQL 23505 錯誤時，代表網址已存在，則僅更新任務狀態為 success 並跳過。
+                        if "23505" in str(db_e):
+                            print(f"♻️ [重複偵測] 網址已在庫存中。標記任務 ID {task_id} 為 success 並跳過。")
+                            supabase.table("mission_queue").update({"scrape_status": "success"}).eq("id", task_id).execute()
+                        else:
+                            # 若非重複性錯誤，則拋出異常由外部主循環捕獲。
+                            raise db_e 
                 else:
+                    # 解析成功但未發現音檔，轉交手動檢查。
                     print(f"🔎 [未發現音檔] 網頁解析成功但無 MP3，標記手動檢查。")
                     supabase.table("mission_queue").update({"scrape_status": "manual_check"}).eq("id", task_id).execute()
+# -----(定位線)以上修改----
             else:
                 print(f"❌ [請求失敗] 供應商回報狀態碼：{resp.status_code if resp else 'No Resp'}")
 
