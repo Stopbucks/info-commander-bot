@@ -127,8 +127,8 @@ def run_full_cycle_test():
         print(f"🛑 [撤退] 物資體積 ({total_mb:.2f}MB) 超標或無回應，不予搬運。")
         return
 
-    # 動態計算分段，確保總請求 <= 20 次，單次約 3-4MB。(目前3.7MB)
-    chunk_size = max(3.8 * 1024 * 1024, math.ceil(total_size / 20))
+    # 動態計算分段，確保總請求 <= 20 次，單次約 3-4MB。(目前4.5MB)
+    chunk_size = max(4.5 * 1024 * 1024, math.ceil(total_size / 20))
     num_chunks = math.ceil(total_size / chunk_size)
     if not os.path.exists('parts'): os.makedirs('parts')
 
@@ -137,7 +137,7 @@ def run_full_cycle_test():
     # 🚀 4. 序列化擬態搬運
     for i in range(num_chunks):
         if i > 0:
-            # 一行註解：針對 3.7MB 以上的大片段，給予更長的伺服器「喘息時間」。
+            # 一行註解：針對 4.5MB 以上的大片段，給予更長的伺服器「喘息時間」。
             jitter = random.uniform(8.5, 16.2) 
             print(f"🕒 [擬態緩衝] 正在進行大片段冷卻，等待 {jitter:.2f} 秒...")
             time.sleep(jitter)
