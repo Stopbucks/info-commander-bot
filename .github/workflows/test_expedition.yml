@@ -1,0 +1,73 @@
+##########################################################################
+# 🧪 S-Plan 偵察兵火力測試 (Expedition Module)
+# 任務：測試各供應商穿透力，並消化 Supabase 待命 (Pending) 任務
+# 註：此為拋棄式測試檔，不含定時排程，僅限手動觸發。
+##########################################################################
+name: 🧪 S-Plan Scanner Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_provider:
+        description: '🧪 選擇欲測試的偵察部隊 (供應商)'
+        required: true
+        default: 'ZENROWS'
+        type: choice
+        options: 
+          - ZENROWS
+          - WEBSCRAPING
+          - SCRAPEDO
+          - HASDATA
+
+jobs:
+  scanner_expedition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # 測試任務設定 30 分鐘即可
+
+    # 🚀 繼承主流程所有戰略金鑰
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      
+      SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
+      ZENROWS_API_KEY: ${{ secrets.ZENROWS_API_KEY }}
+      WEBSCRAP_API_KEY: ${{ secrets.WEBSCRAP_API_KEY }}
+      SCRAPEDO_API_KEY: ${{ secrets.SCRAPEDO_API_KEY }}
+      HASDATA_API_KEY: ${{ secrets.HASDATA_API_KEY }} # 🚀 請確保 GitHub Secrets 已新增此項
+
+      RENDER_WEBHOOK_URL: ${{ secrets.RENDER_WEBHOOK_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      
+      # 🎯 傳遞測試指令給 Python
+      TEST_PROVIDER_MODE: ${{ github.event.inputs.test_provider }}
+      PYTHONUNBUFFERED: 1
+
+    steps:
+    - name: 📦 檢出程式碼
+      uses: actions/checkout@v4
+
+    - name: 🐍 設定 Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: ⚙️ 安裝環境依賴
+      # 一行註解：安裝必要的 Python 函式庫以進行網頁掃描與資料庫操作。
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests beautifulsoup4 supabase python-dotenv boto3
+
+    - name: 🎯 發動偵察演習 (Expedition)
+      # 一行註解：呼叫獨立測試腳本，領取 3 筆任務進行特定供應商穿透測試。
+      run: |
+        echo "🚀 [發動] 正在測試供應商：$TEST_PROVIDER_MODE"
+        python src/test_scanner_expedition.py

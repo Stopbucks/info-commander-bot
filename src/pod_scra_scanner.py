@@ -48,8 +48,9 @@ def fetch_html(provider_key, target_url, keys):
                 'proxy_type': 'datacenter' # 使用 DC 代理以節省點數
             }
             return requests.get('https://api.hasdata.com/scrape', headers=headers, params=params, timeout=60)
-# -----(定位線)以上修改----
+
         return None
+    
     except Exception as e:
         print(f"⚠️ [Scanner 異常] {provider_key} 連線失敗: {e}")
         return None
