@@ -1,11 +1,11 @@
 ##########################################################################
 # 🧪 S-Plan 特種物流演習 (Chunked Relay Transport)
 # 任務：測試 WebScraping.ai 分段搬運 1MB 片段與 FFmpeg 縫合技術
-##########################################################################
+###########################################################################
 name: 🧪 S-Plan Relay Test
 
 on:
-  workflow_dispatch: # 僅限手動觸發，節省點數
+  workflow_dispatch:
 
 jobs:
   transport_test:
@@ -20,6 +20,9 @@ jobs:
       R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       PYTHONUNBUFFERED: 1
 
     steps:
@@ -32,13 +35,12 @@ jobs:
         python-version: '3.12'
         cache: 'pip'
 
-    - name: ⚙️ 安裝環境依賴與 FFmpeg
-      # 一行註解：安裝搬運所需的二進位處理工具及 FFmpeg。
+    - name: ⚙️ 安裝必要依賴與 FFmpeg
+      # 一行註解：補齊 google-generativeai 與 groq，確保 AIAgent 能正常啟動。
       run: |
         sudo apt-get update && sudo apt-get install -y ffmpeg
         python -m pip install --upgrade pip
-        pip install requests boto3 supabase python-dotenv
+        pip install requests boto3 supabase python-dotenv google-generativeai groq beautifulsoup4
 
-    - name: 🎯 執行分段搬運測試
-      # 一行註解：執行核心搬運腳本，觀察擬態緩衝與分段縫合結果。
+    - name: 🎯 執行分段搬運測試 (含 AI 報戰)
       run: python src/test_chunked_transport.py
