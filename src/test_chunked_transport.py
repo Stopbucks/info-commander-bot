@@ -24,11 +24,13 @@ def get_target_specs(url):
         return 0, url
 
 # --- [區塊二：純代理物流中繼模組 v4.5] ---
+# --- [區塊二：代理模式傳輸模組 v4.6] ---
 def fetch_chunk_via_pure_proxy(target_url, start, end, api_key):
-    """一行註解：透過 WebScraping.ai 8888 端口執行純代理傳輸，確保二進位流不被 HTML 污染。"""
-    # 一行註解：將控制參數封裝為密碼，js=false 與 residential 確保高穿透力。
-    proxy_params = "js=false&proxy=residential"
-    # 一行註解：建構認證代理 URL，採用 Basic Auth 格式。
+    """
+    一行註解：在代理參數中強制開啟 keep_headers=true，確保分段下載指令不被代理伺服器丟棄。
+    """
+    # 🚀 關鍵修正：加入 keep_headers=true 參數
+    proxy_params = "js=false&proxy=residential&keep_headers=true"
     proxy_url = f"http://{api_key}:{proxy_params}@proxy.webscraping.ai:8888"
     
     proxies = {"http": proxy_url, "https": proxy_url}
@@ -39,21 +41,22 @@ def fetch_chunk_via_pure_proxy(target_url, start, end, api_key):
     }
 
     try:
-        # 一行註解：使用 verify=False 以相容代理商自簽名憑證。
+        # 一行註解：執行代理請求並獲取響應。
         resp = requests.get(target_url, headers=headers, proxies=proxies, timeout=60, verify=False)
         
         if resp.status_code == 206:
-            # 一行註解：執行品質指紋檢驗，若內容太小或含 HTML 標籤則熔斷。
             if b"<html" in resp.content[:100].lower():
-                print(f"⚠️ [攔截警報] 代理回傳了 HTML 殼層而非二進位碎片。")
+                print(f"⚠️ [攔截警報] 代理回傳了 HTML 殼層。")
                 return None
             return resp.content
-        print(f"❌ [狀態異常] 響應碼：{resp.status_code}")
+        
+        # 🚀 診斷強化：若非 206，印出具體情報以便判讀是否為 265 bytes 的 HTML
+        print(f"❌ [狀態異常] 響應碼：{resp.status_code} | 內容長度：{len(resp.content)} | 類型：{resp.headers.get('Content-Type')}")
         return None
     except Exception as e:
         print(f"⚠️ [連線崩潰] {e}")
         return None
-
+    
 # --- [區塊三：FFmpeg 縫合與重編模組] ---
 def assemble_and_compress(task_id, chunk_count, final_name, source_url):
     """一行註解：合併碎片並執行 16K/Mono/Opus 壓縮，優化 M4A/MP3 索引結構。"""
