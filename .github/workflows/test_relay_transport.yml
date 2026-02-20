@@ -40,7 +40,6 @@ jobs:
       run: |
         sudo apt-get update && sudo apt-get install -y ffmpeg
         python -m pip install --upgrade pip
-        pip install requests boto3 supabase python-dotenv google-generativeai groq beautifulsoup4
-
+        pip install requests urllib3 boto3 supabase python-dotenv google-generativeai groq beautifulsoup4
     - name: 🎯 執行分段搬運測試 (含 AI 報戰)
       run: python src/test_chunked_transport.py
