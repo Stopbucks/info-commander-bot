@@ -34,9 +34,19 @@ def fetch_chunk_via_proxy(target_url, start, end, api_key):
     except Exception: return None
 
 # --- [區塊三：縫合與重編模組 (Assembler)] ---
-def assemble_and_compress(task_id, chunk_count, final_name):
-    """一行註解：二進位縫合片段，並發動 16K/Mono/Opus 壓縮戰術。"""
-    temp_raw = f"{task_id}_raw.mp3"
+# -----(定位線)修改後的縫合與壓縮模組----
+
+def assemble_and_compress(task_id, chunk_count, final_name, source_url):
+    """
+    一行註解：根據原始 URL 動態識別副檔名，並調用 FFmpeg 的強制覆蓋與容錯參數。
+    """
+    # 🚀 修正 1：動態取得原始副檔名 (.mp3, .m4a, .wav)
+    ext = ".mp3"
+    if ".m4a" in source_url.lower(): ext = ".m4a"
+    elif ".wav" in source_url.lower(): ext = ".wav"
+    
+    temp_raw = f"{task_id}_raw{ext}"
+    
     with open(temp_raw, 'wb') as outfile:
         for i in range(chunk_count):
             part_path = f"parts/part_{i}.bin"
@@ -44,15 +54,29 @@ def assemble_and_compress(task_id, chunk_count, final_name):
                 with open(part_path, 'rb') as infile: outfile.write(infile.read())
                 os.remove(part_path)
 
-    print(f"🗜️ [壓縮中] 執行 FFmpeg 高效轉碼 (16K/Mono/Opus)...")
-    subprocess.run([
-        'ffmpeg', '-y', '-i', temp_raw,
+    print(f"🗜️ [壓縮中] 偵測到格式為 {ext}，執行 FFmpeg 轉碼...")
+    
+    # 🚀 修正 2：加入 -ignore_unknown 與 -err_detect 強化容錯
+    # 一行註解：轉碼為 16K/Mono/Opus，並強制要求 FFmpeg 忽略小規模的標頭損壞。
+    result = subprocess.run([
+        'ffmpeg', '-y', 
+        '-err_detect', 'ignore_err', # 強制忽略損壞幀
+        '-i', temp_raw,
         '-ar', '16000', '-ac', '1', '-c:a', 'libopus', '-b:a', '24k',
         final_name
-    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ], capture_output=True, text=True)
+
+    if result.returncode != 0:
+        print(f"❌ [FFmpeg 報錯] {result.stderr}")
+        raise subprocess.CalledProcessError(result.returncode, result.args)
     
     if os.path.exists(temp_raw): os.remove(temp_raw)
     return os.path.getsize(final_name)
+
+    # -----(定位線)修改 run_full_cycle_test 內的呼叫方式----
+    # 在 🚀 5. 區塊更新呼叫參數：
+    c_size = assemble_and_compress(m['id'], num_chunks, final_opus, target_url)
+
 
 # --- [主演習程序 (Main Expedition)] ---
 def run_full_cycle_test():
@@ -124,8 +148,8 @@ def run_full_cycle_test():
 
     # 🚀 5. 縫合、壓縮與 AI 分析
     final_opus = f"RELAY_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{source_name}.opus"
-    compressed_size = assemble_and_compress(m['id'], num_chunks, final_opus)
-    
+    compressed_size = assemble_and_compress(m['id'], num_chunks, final_opus, target_url)
+
     print(f"🧠 [AI 行動] 呼叫智囊團執行摘要...")
     analysis, q_score, duration = ai_agent.generate_gold_analysis(final_opus)
 
