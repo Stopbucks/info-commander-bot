@@ -1,6 +1,7 @@
+
 ##########################################################################
-# 🧪 S-Plan 偵察兵火力測試 (Expedition Module - 雙維度版)
-# 任務：測試各供應商對 Podbay 或 Listen Notes 的穿透力
+# 🧪 S-Plan 偵察兵火力測試 (Expedition Module - 三維度擴充版)
+# 任務：測試各供應商對 Podbay, Listen Notes 或 官方伺服器(OFFICIAL) 的穿透力
 ##########################################################################
 name: 🧪 S-Plan Scanner Test
 
@@ -17,7 +18,7 @@ on:
           - WEBSCRAPING
           - SCRAPEDO
           - HASDATA
-      # 一行註解：新增目標網站選單，讓指揮官決定進攻哪一個情報站點。
+      # 一行註解：新增 OFFICIAL 選項，用於測試官方伺服器（如 Megaphone, Omny）的網址活性化。
       test_site:
         description: '🎯 選擇偵察目標站點'
         required: true
@@ -26,6 +27,7 @@ on:
         options:
           - PODBAY
           - LISTEN_NOTES
+          - OFFICIAL
 
 jobs:
   scanner_expedition:
@@ -53,9 +55,8 @@ jobs:
       RENDER_WEBHOOK_URL: ${{ secrets.RENDER_WEBHOOK_URL }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
       
-      # 🎯 將 YML 選單結果映射至 Python 讀取的變數名稱
+      # 🎯 映射選單：將 GitHub UI 的選擇精準對位至 Python 環境變數。
       TEST_PROVIDER_MODE: ${{ github.event.inputs.test_provider }}
-      # 一行註解：將選單選中的站點（PODBAY/LISTEN_NOTES）傳遞給 Python 腳本。
       TEST_SITE_TARGET: ${{ github.event.inputs.test_site }}
       PYTHONUNBUFFERED: 1
 
@@ -70,11 +71,13 @@ jobs:
         cache: 'pip'
 
     - name: ⚙️ 安裝環境依賴
+      # 一行註解：安裝基礎解析工具，此測試腳本不需 ffmpeg 或 AI 模組以節省啟動時間。
       run: |
         python -m pip install --upgrade pip
         pip install requests beautifulsoup4 supabase python-dotenv boto3
 
     - name: 🎯 發動偵察演習 (Expedition)
+      # 一行註解：啟動測試主程序，根據傳入的站點模式執行不同偵察邏輯。
       run: |
         echo "🚀 [發動] 供應商：$TEST_PROVIDER_MODE | 目標站點：$TEST_SITE_TARGET"
         python src/test_scanner_expedition.py
