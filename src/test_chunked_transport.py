@@ -1,6 +1,6 @@
 # ---------------------------------------------------------
 # 本程式碼：src/test_chunked_transport.py v3.4 (直連解析強化版)
-# 任務：60MB 門檻、4.5MB 動態分段、先行解析直連、FFmpeg 容錯轉碼、AI 報戰
+# 任務：60MB 門檻、5.5MB 動態分段、先行解析直連、FFmpeg 容錯轉碼、AI 報戰
 # ---------------------------------------------------------
 import os, requests, time, random, boto3, math, subprocess
 from supabase import create_client, Client
@@ -110,7 +110,7 @@ def run_full_cycle_test():
         return
 
     # 🚀 4. 分段計算 (採用您選擇的 4.5MB 穩健步調)
-    chunk_size = max(4.5 * 1024 * 1024, math.ceil(total_size / 20))
+    chunk_size = max(5.5 * 1024 * 1024, math.ceil(total_size / 20))
     num_chunks = math.ceil(total_size / chunk_size)
     if not os.path.exists('parts'): os.makedirs('parts')
 
