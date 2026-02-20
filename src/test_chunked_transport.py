@@ -19,28 +19,40 @@ def get_target_specs(url):
         return 0
 
 # --- [區塊二：物流中繼模組 (Relay)] ---
+# --- [區塊二：強化版物流中繼模組] ---
 def fetch_chunk_via_proxy(target_url, start, end, api_key):
-    """一行註解：透過 WebScraping.ai 透傳 Range 標頭進行 4MB 級別抓取。"""
-    proxy_params = {
-        'api_key': api_key, 'url': target_url, 'keep_headers': 'true', 'proxy': 'residential'
-    }
-    custom_headers = {
-        'Range': f'bytes={start}-{end}',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebkit/537.36'
-    }
+    """
+    一行註解：透傳 Range 標頭，並在寫入前執行「二進位指紋檢核」以防止 HTML 污染。
+    """
+    proxy_params = {'api_key': api_key, 'url': target_url, 'keep_headers': 'true', 'proxy': 'residential'}
+    custom_headers = {'Range': f'bytes={start}-{end}', 'User-Agent': 'Mozilla/5.0'}
     try:
         resp = requests.get('https://api.webscraping.ai/html', params=proxy_params, headers=custom_headers, timeout=60)
-        return resp.content if resp.status_code in [200, 206] else None
+        if resp.status_code in [200, 206]:
+            # 🚀 關鍵防護：檢查前 100 位元組，如果是 HTML 則代表被代理攔截或重定向了
+            if b"<html" in resp.content[:100].lower():
+                print(f"⚠️ [攔截警報] 獲取到 HTML 內容而非音訊碎片，請求失敗。")
+                return None
+            return resp.content
+        return None
     except Exception: return None
 
 # --- [區塊三：縫合與重編模組 (Assembler)] ---
 # -----(定位線)修改後的縫合與壓縮模組----
 
+# --- [區塊三：強化版縫合與壓縮] ---
 def assemble_and_compress(task_id, chunk_count, final_name, source_url):
-    """
-    一行註解：根據原始 URL 動態識別副檔名，並調用 FFmpeg 的強制覆蓋與容錯參數。
-    """
-    # 🚀 修正 1：動態取得原始副檔名 (.mp3, .m4a, .wav)
+    # (動態 ext 識別邏輯相同...)
+    # 一行註解：轉碼時加入 -movflags faststart，優化 M4A/Opus 結構。
+    result = subprocess.run([
+        'ffmpeg', '-y', '-err_detect', 'ignore_err',
+        '-i', temp_raw,
+        '-ar', '16000', '-ac', '1', '-c:a', 'libopus', '-b:a', '24k',
+        '-movflags', 'faststart', # 🚀 強化 M4A 索引結構處理
+        final_name
+    ], capture_output=True, text=True)
+    
+    # 🚀 1：動態取得原始副檔名 (.mp3, .m4a, .wav)
     ext = ".mp3"
     if ".m4a" in source_url.lower(): ext = ".m4a"
     elif ".wav" in source_url.lower(): ext = ".wav"
@@ -56,7 +68,7 @@ def assemble_and_compress(task_id, chunk_count, final_name, source_url):
 
     print(f"🗜️ [壓縮中] 偵測到格式為 {ext}，執行 FFmpeg 轉碼...")
     
-    # 🚀 修正 2：加入 -ignore_unknown 與 -err_detect 強化容錯
+    # 🚀 2：加入 -ignore_unknown 與 -err_detect 強化容錯
     # 一行註解：轉碼為 16K/Mono/Opus，並強制要求 FFmpeg 忽略小規模的標頭損壞。
     result = subprocess.run([
         'ffmpeg', '-y', 
@@ -73,8 +85,7 @@ def assemble_and_compress(task_id, chunk_count, final_name, source_url):
     if os.path.exists(temp_raw): os.remove(temp_raw)
     return os.path.getsize(final_name)
 
-    # -----(定位線)修改 run_full_cycle_test 內的呼叫方式----
-    # 在 🚀 5. 區塊更新呼叫參數：
+     # 在 🚀 5. 區塊更新呼叫參數：
     c_size = assemble_and_compress(m['id'], num_chunks, final_opus, target_url)
 
 
@@ -92,7 +103,6 @@ def run_full_cycle_test():
                              aws_access_key_id=r2_id, aws_secret_access_key=r2_secret)
 
     # 🚀 2. 領取 1 筆待命物資
-    #(修改)res = supabase.table("mission_queue").select("*").eq("status", "pending").eq("scrape_status", "success").limit(1).execute()
     # 一行註解：領取待命任務，優先考慮已偵察(success)或剛入庫(pending)且具備下載網址的物資。
     res = supabase.table("mission_queue").select("*") \
         .eq("status", "pending") \
@@ -101,7 +111,6 @@ def run_full_cycle_test():
         .order("created_at", desc=True) \
         .limit(1).execute()
 
-    # -----(定位線)以上修改----
     if not res.data: 
         print("☕ [待命] 暫無物資需演習。")
         return
@@ -118,8 +127,8 @@ def run_full_cycle_test():
         print(f"🛑 [撤退] 物資體積 ({total_mb:.2f}MB) 超標或無回應，不予搬運。")
         return
 
-    # 一行註解：動態計算分段，確保總請求 <= 20 次，單次約 3-4MB。
-    chunk_size = max(3.5 * 1024 * 1024, math.ceil(total_size / 20))
+    # 動態計算分段，確保總請求 <= 20 次，單次約 3-4MB。(目前3.7MB)
+    chunk_size = max(3.7 * 1024 * 1024, math.ceil(total_size / 20))
     num_chunks = math.ceil(total_size / chunk_size)
     if not os.path.exists('parts'): os.makedirs('parts')
 
@@ -128,7 +137,7 @@ def run_full_cycle_test():
     # 🚀 4. 序列化擬態搬運
     for i in range(num_chunks):
         if i > 0:
-            # 一行註解：針對 3.5MB 以上的大片段，給予更長的伺服器「喘息時間」。
+            # 一行註解：針對 3.7MB 以上的大片段，給予更長的伺服器「喘息時間」。
             jitter = random.uniform(8.5, 16.2) 
             print(f"🕒 [擬態緩衝] 正在進行大片段冷卻，等待 {jitter:.2f} 秒...")
             time.sleep(jitter)
