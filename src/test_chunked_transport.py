@@ -68,7 +68,16 @@ def run_full_cycle_test():
                              aws_access_key_id=r2_id, aws_secret_access_key=r2_secret)
 
     # 🚀 2. 領取 1 筆待命物資
-    res = supabase.table("mission_queue").select("*").eq("status", "pending").eq("scrape_status", "success").limit(1).execute()
+    #(修改)res = supabase.table("mission_queue").select("*").eq("status", "pending").eq("scrape_status", "success").limit(1).execute()
+    # 一行註解：領取待命任務，優先考慮已偵察(success)或剛入庫(pending)且具備下載網址的物資。
+    res = supabase.table("mission_queue").select("*") \
+        .eq("status", "pending") \
+        .not_.is_("audio_url", "null") \
+        .or_("scrape_status.eq.success,scrape_status.eq.pending") \
+        .order("created_at", desc=True) \
+        .limit(1).execute()
+
+    # -----(定位線)以上修改----
     if not res.data: 
         print("☕ [待命] 暫無物資需演習。")
         return
