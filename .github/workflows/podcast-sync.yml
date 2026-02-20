@@ -103,7 +103,30 @@ jobs:
         echo "📡 正在偵測出口 IP (洗滌後)..."
         # 使用系統 timeout 15秒，即使網路斷掉也會在 15 秒內強制結束
         timeout 15s curl -s4 --retry 1 https://api.ip.sb/geoip || echo "⚠️ 出口偵測逾時，將嘗試直接執行任務。"
-
+#---[區塊 C]：條件式預熱前面程式碼相同---#
+# -----(定位線)以下修改----
+    - name: ⏳ 專業代理小隊深度預熱 (Fly.io Smart Warmup)
+      if: env.NEED_WARP == 'false'
+      run: |
+        echo "🚀 啟動階段式喚醒程序，目標：${{ env.PATH_ID }} 小隊"
+        
+        # 定義嘗試次數，每 20 秒檢查一次，共 10 次 (約 200 秒)
+        for i in {1..10}; do
+          echo "📡 第 $i 次喚醒嘗試..."
+          # 使用 curl 嘗試連線代理，僅需檢查是否能建立 TCP 連線
+          if curl -I -m 10 --proxy "${{ secrets.FLY_PROXY_LA }}" https://www.google.com > /dev/null 2>&1; then
+            echo "✅ Fly.io LA 節點已成功就緒！"
+            break
+          fi
+          
+          if [ $i -eq 10 ]; then
+            echo "⚠️ 已達到 200 秒上限，將嘗試強制執行任務（風險提醒：可能導致 IP 洩漏）。"
+          else
+            echo "💤 機器尚未完全就緒，等待 20 秒後重試..."
+            sleep 20
+          fi
+        done
+#---下一步就是執行任務---#
     - name: 🚀 執行任務 (Run Info Commander)
       env:
         # --- 核心 API 金鑰 ---
