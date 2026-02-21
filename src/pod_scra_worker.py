@@ -3,84 +3,84 @@
 # 職責：領取任務 -> 串流下載 -> 直送 R2 (含 Metadata) -> 狀態更新
 # 適用平台：GitHub Actions / Render / Koyeb
 # ---------------------------------------------------------
-import os, requests, boto3, re, urllib3
+import os
+import time
+import requests
+import boto3
 from supabase import create_client, Client
-from datetime import datetime
+from dotenv import load_dotenv
 
-# 禁用 SSL 警告，保持 Koyeb/Render 日誌畫面整潔。
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+#---(定位線) 全文提供：解耦後專注物流搬運的程式碼 ---#
+# 一行註解：載入環境變數與初始化客戶端。
+load_dotenv()
 
-# --- [區塊一：物流技術中心] ---
-def stream_to_r2_with_metadata(mission_data, s3_client, bucket_name):
-    """
-    一行註解：執行零磁碟串流搬運，將 Supabase 關鍵數據封裝進 R2 Metadata 中。
-    """
-    # 🚀 檔名規格化：2026_02_21_標題_節目.m4a
-    safe_title = re.sub(r'[\\/:*?"<>|]', '_', mission_data['episode_title'])[:50]
-    safe_source = re.sub(r'[\\/:*?"<>|]', '_', mission_data['source_name'])
-    final_name = f"{datetime.now().strftime('%Y_%m_%d')}_{safe_title}_{safe_source}.m4a"
+def get_s3_client():
+    # 一行註解：建立與 R2 倉庫的通訊連接。
+    return boto3.client(
+        's3',
+        endpoint_url=os.environ.get("R2_ENDPOINT_URL"),
+        aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY"),
+        region_name="auto"
+    )
 
-    # 🚀 標籤注入 (Metadata Tagging)
-    # 將 Supabase ID 與標題綁入標頭，AI 分析局未來可直接讀取。
-    meta = {
-        "supabase_id": str(mission_data['id']),
-        "title": safe_title,
-        "source": safe_source
-    }
-
+def upload_to_r2(file_path, bucket_name, object_name):
+    # 一行註解：將本地暫存檔案推送至雲端 R2 倉庫。
+    s3 = get_s3_client()
     try:
-        with requests.get(mission_data['audio_url'], stream=True, timeout=60) as r:
-            r.raise_for_status()
-            # 一行註解：upload_fileobj 是處理大檔案且記憶體受限環境（如 Koyeb）的最佳方案。
-            s3_client.upload_fileobj(r.raw, bucket_name, final_name, 
-                                     ExtraArgs={'ContentType': 'audio/mpeg', 'Metadata': meta})
-        return final_name
+        s3.upload_file(file_path, bucket_name, object_name)
+        print(f"✅ [入庫成功] 檔案已存至: {object_name}")
+        return True
     except Exception as e:
-        print(f"❌ [傳輸潰敗] 檔案：{safe_title} 失敗：{e}")
-        return None
+        print(f"❌ [入庫失敗] 錯誤原因: {e}")
+        return False
 
-# --- [區塊二：主調度邏輯] ---
-def run_worker_mission():
-    # 1. 初始化指揮中心
-    sb: Client = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
-    r2 = boto3.client('s3', endpoint_url=f"https://{os.environ.get('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com",
-                      aws_access_key_id=os.environ.get('R2_ACCESS_KEY_ID'), 
-                      aws_secret_access_key=os.environ.get('R2_SECRET_ACCESS_KEY'))
+def run_logistics_mission():
+    # 一行註解：啟動物流巡邏邏輯，尋找待搬運物資。
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_KEY")
+    sb: Client = create_client(url, key)
 
-
-
-    # 🚀 加入循環哨兵邏輯
     while True:
-        print(f"🕒 [哨兵巡邏] {datetime.now().strftime('%H:%M:%S')} 正在檢索 Supabase 任務...")
-        try:
-            # 領取任務：鎖定狀態為 success 且 pending 的物資
-            res = sb.table("mission_queue").select("*").eq("scrape_status", "success").eq("status", "pending").limit(1).execute()
-            
-            if res.data:
-                mission = res.data[0]
-                print(f"🚛 [起運] 正在搬運：{mission['episode_title']}")
-                r2_path = stream_to_r2_with_metadata(mission, r2, os.environ.get("R2_BUCKET_NAME"))
+        print(f"🕒 [哨兵巡邏] 正在掃描任務隊列 (Target: pending)...")
+        
+        # 一行註解：查詢狀態為待處理且已偵察成功的任務。
+        mission = sb.table("mission_queue").select("*").eq("status", "pending").eq("scrape_status", "success").limit(1).execute()
 
-                if r2_path:
+        if mission.data:
+            task = mission.data[0]
+            task_id = task['id']
+            audio_url = task['audio_url']
+            file_name = f"{task['pub_date']}_{task['title'][:30]}.m4a"
+            temp_path = f"/tmp/{file_name}"
+
+            print(f"🚛 [起運] 偵測到物資: {task['title']}")
+
+            # 一行註解：開始下載音訊物資。
+            try:
+                resp = requests.get(audio_url, timeout=60)
+                with open(temp_path, "wb") as f:
+                    f.write(resp.content)
+                
+                # 一行註解：執行 R2 入庫作業。
+                if upload_to_r2(temp_path, os.environ.get("R2_BUCKET_NAME"), file_name):
+                    # 一行註解：更新資料庫狀態為已入庫。
                     sb.table("mission_queue").update({
                         "status": "stored_in_r2",
-                        "r2_url": r2_path,
-                        "mission_type": "logistics_completed"
-                    }).eq("id", mission['id']).execute()
-                    print(f"🏆 [結案] 檔案已安全入庫 R2：{r2_path}")
+                        "r2_path": file_name
+                    }).eq("id", task_id).execute()
+                    print(f"🏆 [結案] 任務 {task_id} 搬運完畢。")
                 
-            else:
-                print("☕ [物流部] 目前無待搬運物資。")
+                if os.path.exists(temp_path): os.remove(temp_path)
 
-        except Exception as e:
-            print(f"⚠️ [巡邏異常]：{e}")
+            except Exception as e:
+                print(f"⚠️ [運輸事故] 任務 ID {task_id} 失敗: {e}")
 
-        # 🚀 戰術休眠：每 30 分鐘巡邏一次，避免過度查詢資料庫
-        idle_time = 1800 
-        print(f"💤 進入戰術休眠 {idle_time//60} 分鐘...")
-        time.sleep(idle_time)
-
-
+        else:
+            print(f"☕ [物流部] 目前無待搬運物資，5 分鐘後再次巡邏。")
+        
+        time.sleep(300) # 一行註解：設定巡邏間隔為 5 分鐘。
 
 if __name__ == "__main__":
-    run_worker_mission()
+    run_logistics_mission()
+#---(定位線) 以上修改完成 ---#
