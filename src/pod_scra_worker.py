@@ -1,18 +1,32 @@
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_worker.py v5.5 (通用物流版)
+# 本程式碼：src/pod_scra_worker.py v5.6 (戰術校準版)
 # 職責：領取任務 -> 串流下載 -> 直送 R2 (含 Metadata) -> 狀態更新
-# 適用平台：GitHub Actions / Render / Koyeb
 # ---------------------------------------------------------
 import os
 import time
 import requests
 import boto3
-from supabase import create_client, Client
+from supabase import create_client, Client # 導入資料庫通訊工具
 from dotenv import load_dotenv
 
-#---(定位線) 全文提供：解耦後專注物流搬運的程式碼 ---#
-# 一行註解：載入環境變數與初始化客戶端。
+# 一行註解：啟動環境變數加載程序。
 load_dotenv()
+
+def get_supabase_client():
+    # 一行註解：獲取變數並強制修剪首尾空白字元以防認證錯誤。
+    url = os.environ.get("SUPABASE_URL", "").strip()
+    key = os.environ.get("SUPABASE_KEY", "").strip()
+    
+    if not url or not key:
+        print("❌ [錯誤] 環境變數讀取失敗，請檢查 Zeabur 設定")
+        return None
+
+    try:
+        # 一行註解：建立與 Supabase 基地台的認證連線。
+        return create_client(url, key)
+    except Exception as e:
+        print(f"❌ [連線報錯] {str(e)}")
+        raise e
 
 def get_s3_client():
     # 一行註解：建立與 R2 倉庫的通訊連接。
@@ -36,35 +50,39 @@ def upload_to_r2(file_path, bucket_name, object_name):
         return False
 
 def run_logistics_mission():
-    # 一行註解：啟動物流巡邏邏輯，尋找待搬運物資。
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_KEY")
-    sb: Client = create_client(url, key)
+    # 一行註解：使用強化後的連線模組啟動任務。
+    sb = get_supabase_client()
+    
+    if not sb:
+        print("❌ [物流部] 通行證校驗失敗，任務中止。")
+        return
 
     while True:
         print(f"🕒 [哨兵巡邏] 正在掃描任務隊列 (Target: pending)...")
         
-        # 一行註解：查詢狀態為待處理且已偵察成功的任務。
-        mission = sb.table("mission_queue").select("*").eq("status", "pending").eq("scrape_status", "success").limit(1).execute()
+        try:
+            # 一行註解：抓取待處理且偵察成功的任務。
+            mission = sb.table("mission_queue").select("*").eq("status", "pending").eq("scrape_status", "success").limit(1).execute()
+            
+            if mission.data:
+                task = mission.data[0]
+                task_id = task['id']
+                audio_url = task['audio_url']
+                file_name = f"{task['pub_date']}_{task['title'][:30]}.m4a"
+                temp_path = f"/tmp/{file_name}"
 
-        if mission.data:
-            task = mission.data[0]
-            task_id = task['id']
-            audio_url = task['audio_url']
-            file_name = f"{task['pub_date']}_{task['title'][:30]}.m4a"
-            temp_path = f"/tmp/{file_name}"
+                print(f"🚛 [起運] 偵測到物資: {task['title']}")
 
-            print(f"🚛 [起運] 偵測到物資: {task['title']}")
-
-            # 一行註解：開始下載音訊物資。
-            try:
-                resp = requests.get(audio_url, timeout=60)
-                with open(temp_path, "wb") as f:
-                    f.write(resp.content)
+                # 一行註解：使用串流模式下載以節省共享叢集內存。
+                resp = requests.get(audio_url, timeout=60, stream=True)
+                resp.raise_for_status()
                 
-                # 一行註解：執行 R2 入庫作業。
+                with open(temp_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
                 if upload_to_r2(temp_path, os.environ.get("R2_BUCKET_NAME"), file_name):
-                    # 一行註解：更新資料庫狀態為已入庫。
+                    # 一行註解：回報雲端倉庫儲存路徑並更新狀態。
                     sb.table("mission_queue").update({
                         "status": "stored_in_r2",
                         "r2_path": file_name
@@ -73,14 +91,15 @@ def run_logistics_mission():
                 
                 if os.path.exists(temp_path): os.remove(temp_path)
 
-            except Exception as e:
-                print(f"⚠️ [運輸事故] 任務 ID {task_id} 失敗: {e}")
-
-        else:
-            print(f"☕ [物流部] 目前無待搬運物資，5 分鐘後再次巡邏。")
+            else:
+                print(f"☕ [物流部] 目前無待搬運物資，5 分鐘後再次巡邏。")
         
-        time.sleep(300) # 一行註解：設定巡邏間隔為 5 分鐘。
+        except Exception as e:
+            print(f"⚠️ [巡邏波動] 異常回報: {e}")
+            time.sleep(60)
+            continue
+        
+        time.sleep(300)
 
 if __name__ == "__main__":
     run_logistics_mission()
-#---(定位線) 以上修改完成 ---#
