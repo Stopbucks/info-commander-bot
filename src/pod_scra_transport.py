@@ -102,6 +102,8 @@ def run_transport_and_report():
 
 
     # --- 區塊：3新 + 2舊 混編領取邏輯 (不變，維持優良戰術) ---#02/20測試期間改2新1舊
+    # ----#02/21 測試期間改1新1舊
+    # -------------------------------------------------------------------------
     new_m = supabase.table("mission_queue").select("*") \
         .filter("status", "eq", "pending") \
         .or_("scrape_status.eq.success,scrape_status.eq.manual_check") \
