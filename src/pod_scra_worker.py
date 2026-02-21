@@ -1,28 +1,28 @@
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_worker.py v5.6 (戰術校準版)
-# 職責：領取任務 -> 串流下載 -> 直送 R2 (含 Metadata) -> 狀態更新
+# 本程式碼：src/pod_scra_worker.py v5.7 (語法修正版)
+# 職責：領取任務 -> 串流下載 -> 直送 R2 -> 狀態更新
 # ---------------------------------------------------------
 import os
 import time
 import requests
 import boto3
-from supabase import create_client, Client # 導入資料庫通訊工具
+from supabase import create_client, Client
 from dotenv import load_dotenv
 
-# 一行註解：啟動環境變數加載程序。
+# 一行註解：啟動環境變數加載。
 load_dotenv()
 
 def get_supabase_client():
-    # 一行註解：獲取變數並強制修剪首尾空白字元以防認證錯誤。
+    # 一行註解：獲取並強制修剪變數空白以防認證錯誤。
     url = os.environ.get("SUPABASE_URL", "").strip()
     key = os.environ.get("SUPABASE_KEY", "").strip()
     
     if not url or not key:
-        print("❌ [錯誤] 環境變數讀取失敗，請檢查 Zeabur 設定")
+        print("❌ [錯誤] 環境變數讀取失敗，請檢查設定")
         return None
 
     try:
-        # 一行註解：建立與 Supabase 基地台的認證連線。
+        # 一行註解：建立與 Supabase 的認證連線。
         return create_client(url, key)
     except Exception as e:
         print(f"❌ [連線報錯] {str(e)}")
@@ -39,7 +39,7 @@ def get_s3_client():
     )
 
 def upload_to_r2(file_path, bucket_name, object_name):
-    # 一行註解：將本地暫存檔案推送至雲端 R2 倉庫。
+    # 一行註解：將暫存檔案推送至 R2 倉庫。
     s3 = get_s3_client()
     try:
         s3.upload_file(file_path, bucket_name, object_name)
@@ -50,7 +50,7 @@ def upload_to_r2(file_path, bucket_name, object_name):
         return False
 
 def run_logistics_mission():
-    # 一行註解：使用強化後的連線模組啟動任務。
+    # 一行註解：啟動自動化物流巡邏。
     sb = get_supabase_client()
     
     if not sb:
@@ -73,7 +73,7 @@ def run_logistics_mission():
 
                 print(f"🚛 [起運] 偵測到物資: {task['title']}")
 
-                # 一行註解：使用串流模式下載以節省共享叢集內存。
+                # 一行註解：使用串流下載以節省內存空間。
                 resp = requests.get(audio_url, timeout=60, stream=True)
                 resp.raise_for_status()
                 
@@ -82,7 +82,7 @@ def run_logistics_mission():
                         f.write(chunk)
                 
                 if upload_to_r2(temp_path, os.environ.get("R2_BUCKET_NAME"), file_name):
-                    # 一行註解：回報雲端倉庫儲存路徑並更新狀態。
+                    # 一行註解：完成後同步更新資料庫狀態。
                     sb.table("mission_queue").update({
                         "status": "stored_in_r2",
                         "r2_path": file_name
