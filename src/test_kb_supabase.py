@@ -43,5 +43,12 @@ def test_koyeb_env():
         # 一行註解：捕捉實體報錯訊息，這將揭露 SSL 或 403 封鎖的真相。
         print(f"❌ [報錯細節]: {str(e)}")
 
+
 if __name__ == "__main__":
     test_koyeb_env()
+    
+    # 🚀 戰術修正：加入無限迴圈，防止容器執行完畢後立即關閉，導致日誌丟失。
+    import time
+    print("⏳ [待命] 測試完成，腳本進入休眠模式，以便您查看日誌...")
+    while True:
+        time.sleep(60)
