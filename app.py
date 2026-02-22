@@ -54,7 +54,8 @@ def trigger_fallback():
     # 一行註解：立即回傳 202 訊號給 GitHub，不再等待子程序啟動。
     return jsonify({"status": "accepted", "message": "Mission in progress"}), 202
 
+ 
 if __name__ == "__main__":
-    # 一行註解：啟動生產級伺服器接口。
+        
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
