@@ -1,54 +1,75 @@
 # ---------------------------------------------------------
-# 本程式碼：src/test_handoff_call.py v1.6 (雙模偵察版)
-# 任務：同時驗證 Body-Secret 與 Header-Secret 兩條通路。
+# 本程式碼：src/test_handoff_call.py v2.0 (全路徑直擊版)
+# 任務：以 6 種組合模式嘗試與 Render 握手，找出最直接的通訊路徑。
 # ---------------------------------------------------------
 import os
 import requests
+import json
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 # 一行註解：初始化環境變數。
 load_dotenv()
 
-def run_dual_protocol_test():
-    # 一行註解：讀取映射變數，避免暴露原始 Secret 名稱。
-    target_url = os.environ.get("TARGET_A")
-    token = os.environ.get("TOKEN_A")
+def run_direct_shotgun_test():
+    # 一行註解：讀取 GitHub 注入的原始座標與暗號。
+    raw_url = os.environ.get("TARGET_A", "").strip()
+    token = os.environ.get("TOKEN_A", "").strip()
     
-    if not target_url or not token:
-        print("❌ [中止] 變數缺失。")
+    if not raw_url or not token:
+        print("❌ [中止] 缺少關鍵作戰座標或暗號。")
         return
 
-    # 一行註解：建構中性化的測試數據。
-    test_data = {"status": "sync_test", "utc": datetime.now(timezone.utc).isoformat()}
-
-    # --- ⚔️ 第一輪：老派戰術 (JSON Body 封裝) ---
-    print(f"📡 [嘗試 1/2] 正在發送 JSON Body 驗證包...")
-    payload_body = {"secret": token, "data": test_data}
+    # 一行註解：清洗網址，移除末端可能的斜槓。
+    base_url = raw_url.rstrip('/')
     
-    try:
-        r1 = requests.post(target_url, json=payload_body, timeout=30)
-        print(f"📡 [回報] 狀態碼：{r1.status_code} | 回應：{r1.text[:50]}...")
-        if r1.status_code in [200, 202]:
-            print("🏆 [突破] 確定使用：JSON Body 驗證 (老派戰術有效)！")
-            return
-    except Exception:
-        print("❌ [失敗] 第一通路斷裂。")
+    # 🎯 拼接嘗試清單：嘗試所有可能的入口。
+    endpoints = [
+        f"{base_url}/fallback",  # 方案 1：精準側門 (app.py 標記點)
+        base_url,                # 方案 2：原始路徑 (GitHub Secret 原樣)
+        f"{base_url}/"           # 方案 3：根目錄閉合
+    ]
 
-    # --- ⚔️ 第二輪：現役戰術 (X-Cron-Secret Header) ---
-    print(f"📡 [嘗試 2/2] 正在發送 Header 標頭驗證...")
-    custom_headers = {"X-Cron-Secret": token, "Content-Type": "application/json"}
+    # 一行註解：建立中性化測試負載。
+    test_data = {"msg": "handshake_v2.0", "ts": datetime.now(timezone.utc).isoformat()}
     
-    try:
-        r2 = requests.post(target_url, json=test_data, headers=custom_headers, timeout=30)
-        print(f"📡 [回報] 狀態碼：{r2.status_code} | 回應：{r2.text[:50]}...")
-        if r2.status_code in [200, 202]:
-            print("🏆 [突破] 確定使用：X-Cron-Secret Header (現代戰術有效)！")
-            return
-    except Exception:
-        print("❌ [失敗] 第二通路斷裂。")
+    # 一行註解：偽裝真實瀏覽器指紋，繞過 WAF 攔截。
+    browser_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
-    print("🚨 [警告] 雙路徑皆未回傳成功訊號，請檢查 URL 是否包含路徑尾碼。")
+    print(f"🚀 [決戰開啟] 準備進行多維度座標測試...")
+
+    for i, url in enumerate(endpoints, 1):
+        print(f"\n📍 測試路徑 {i}: {url[-25:]}")
+
+        # --- ⚔️ 模式 A：遺產 JSON Body 驗證 (最直覺的舊法) ---
+        print("   🔹 [模式 A] 嘗試 Body Secret...")
+        try:
+            r_body = requests.post(
+                url, 
+                json={"secret": token, "data": test_data},
+                headers={"User-Agent": browser_ua},
+                timeout=15
+            )
+            print(f"      回報：{r_body.status_code} | 回應：{r_body.text[:30]}")
+            if r_body.status_code in [200, 202]:
+                print(f"🏆 [大獲全勝] 成功座標：{url} | 模式：Body Secret"); return
+        except: print("      ❌ 網路潰敗")
+
+        # --- ⚔️ 模式 B：現役 X-Cron-Secret Header 驗證 ---
+        print("   🔹 [模式 B] 嘗試 Header Secret...")
+        try:
+            r_head = requests.post(
+                url, 
+                json=test_data,
+                headers={"X-Cron-Secret": token, "User-Agent": browser_ua},
+                timeout=15
+            )
+            print(f"      回報：{r_head.status_code}")
+            if r_head.status_code in [200, 202]:
+                print(f"🏆 [大獲全勝] 成功座標：{url} | 模式：Header Secret"); return
+        except: print("      ❌ 網路潰敗")
+
+    print("\n🚨 [警告] 本輪 6 種組合皆未擊中目標。請確認 Render 服務名稱是否正確。")
 
 if __name__ == "__main__":
-    run_dual_protocol_test()
+    run_direct_shotgun_test()

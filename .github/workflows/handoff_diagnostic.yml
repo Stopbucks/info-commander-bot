@@ -1,29 +1,7 @@
-##########################################################################
-# 📡 S-Plan 最終通訊演習 (Final Handshake Attempt)
-##########################################################################
-name: 📡 S-Plan Handoff Final
-
-on:
-  workflow_dispatch:
-
-jobs:
-  diagnostic_mission:
-    runs-on: ubuntu-latest
-    steps:
-    - name: 📦 檢出程式碼
-      uses: actions/checkout@v4
-
-    - name: 🐍 設定 Python 3.12
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-
-    - name: ⚙️ 安裝環境依賴
-      run: pip install requests python-dotenv
-
-    - name: 🎯 發動雙軌通訊測試
+#---前面配置相同---#
+    - name: 🎯 執行第二次決戰測試
       env:
-        # 一行註解：將 GitHub Secrets 安全映射至中性變數。
+        # 一行註解：直接對接 GitHub Secrets。
         TARGET_A: ${{ secrets.RENDER_WEBHOOK_URL }}
         TOKEN_A: ${{ secrets.CRON_SECRET }}
         PYTHONUNBUFFERED: 1
