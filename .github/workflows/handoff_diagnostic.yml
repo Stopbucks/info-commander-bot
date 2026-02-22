@@ -1,31 +1,14 @@
 ##########################################################################
-# 📡 S-Plan 通訊鏈路診斷 (Handoff Discovery Module - 安全強化版)
-# 任務：測試通訊活性，並確保在公開倉庫中不留指紋。
+# 📡 S-Plan 最終通訊演習 (Final Handshake Attempt)
 ##########################################################################
-name: 📡 S-Plan Handoff Diagnostic
+name: 📡 S-Plan Handoff Final
 
 on:
-  # 🚀 模糊化外部觸發名稱
-  repository_dispatch:
-    types: [diag_trigger]
-
-  # 🛠️ 手動測試啟動
   workflow_dispatch:
-    inputs:
-      test_target:
-        description: '🎯 模式選擇'
-        required: true
-        default: 'MODE_ALL'
-        type: choice
-        options:
-          - MODE_ALL
-          - MODE_A
 
 jobs:
-  diagnostic_call:
+  diagnostic_mission:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
     steps:
     - name: 📦 檢出程式碼
       uses: actions/checkout@v4
@@ -34,20 +17,14 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
-        cache: 'pip'
 
-    - name: ⚙️ 安裝輕量化依賴
-      run: |
-        python -m pip install --upgrade pip
-        pip install requests python-dotenv
+    - name: ⚙️ 安裝環境依賴
+      run: pip install requests python-dotenv
 
-    - name: 📡 執行通訊效能校驗
+    - name: 🎯 發動雙軌通訊測試
       env:
-        # 一行註解：採用抽象映射名稱，隱藏 Secret 原始用途。
+        # 一行註解：將 GitHub Secrets 安全映射至中性變數。
         TARGET_A: ${{ secrets.RENDER_WEBHOOK_URL }}
         TOKEN_A: ${{ secrets.CRON_SECRET }}
-        RUN_MODE: ${{ github.event.inputs.test_target || 'MODE_ALL' }}
         PYTHONUNBUFFERED: 1
-      run: |
-        echo "🚀 [啟動] 執行協議測試，當前模式: $RUN_MODE"
-        python src/test_handoff_call.py
+      run: python src/test_handoff_call.py
