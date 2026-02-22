@@ -32,35 +32,34 @@ def get_secret(key, default=None):
 
 def trigger_render_webhook():
     """
-    📡 [通訊] 喚醒 Render 據點：對位實戰入口並發送雙重驗證。
+    📡 [通訊] 強效喚醒 Render：結合抖動防護與 60 秒長效等待。
     """
-    # 一行註解：執行通訊抖動保護，避免多路並行造成的資源競爭。
+    # 一行註解：隨機延遲（10-30秒）是為了產生通訊抖動，避開自動化流量偵測。
     wait_time = random.randint(10, 30)
-    print(f"⏳ [通訊防護] 隨機等待 {wait_time} 秒後發送訊號...")
+    print(f"⏳ [通訊防護] 執行擬態抖動，隨機等待 {wait_time} 秒...")
     time.sleep(wait_time)
 
-    # 一行註解：讀取網址並自動執行座標清洗，補全 /fallback 尾碼。
+    # 一行註解：讀取網址並自動補齊端點，確保請求能擊中實戰入口。
     raw_url = get_secret("RENDER_WEBHOOK_URL")
     url = raw_url if "/fallback" in str(raw_url) else str(raw_url).rstrip('/') + "/fallback"
     auth_token = get_secret("CRON_SECRET")
 
-    # 一行註解：偽裝真實瀏覽器標頭，並封裝 Body 與 Header 雙向驗證金鑰。
+    #  封裝雙重認證與 User-Agent 偽裝，這是目前最穩健的穿透封裝。
     headers = {'X-Cron-Secret': auth_token, 'User-Agent': 'Mozilla/5.0'}
     payload = {'secret': auth_token, 'data': {'cmd': 'transport_handoff', 'origin': 'github_action'}}
 
     try:
-        # 一行註解：執行 POST 請求發動握手，超時設定為 15 秒以策安全。
-        res = requests.post(url, json=payload, headers=headers, timeout=15)
+        #  將超時上限設為 60 秒，給予 Render Free 階層充足的冷啟動緩衝時間。
+        res = requests.post(url, json=payload, headers=headers, timeout=60)
         print(f"📡 [呼叫結果] 狀態碼：{res.status_code}")
     except Exception as e:
-        print(f"⚠️ [呼叫異常] 無法聯繫 Render 據點：{e}")
-
+        print(f"⚠️ [呼叫異常] 通訊實體斷裂：{e}")
 # ==========================================================================
 # --- ⚔️ 戰術核心模組 (Tactics Module) ---
 # ==========================================================================
 
 def get_tactics(supabase: Client):
-    # 一行註解：從 Supabase 戰術板讀取當前執勤派令。
+    # 從 Supabase 戰術板讀取當前執勤派令。
     res = supabase.table("pod_scra_tactics").select("*").eq("id", 1).execute()
     return res.data[0] if res.data else None
 
@@ -78,7 +77,7 @@ def update_active_worker(supabase: Client, next_worker: str, status_msg: str, is
 
 
 def handle_failure_logic(supabase: Client, tactics: dict, error: Exception):
-    # 一行註解：分類處理任務失敗，403 觸發即時熔斷，其餘執行軟失敗累加。
+    #  分類處理任務失敗，403 觸發即時熔斷，其餘執行軟失敗累加。
     err_str = str(error)
     if "403" in err_str:
         print(f"🚨 [硬斷路] 偵測到 403 封鎖，立即移交 Render 據點...")
@@ -98,7 +97,7 @@ def handle_failure_logic(supabase: Client, tactics: dict, error: Exception):
 # ==========================================================================
 
 def run_transport_and_report():
-    # 一行註解：調用憑證識別器，統一獲取 Supabase 與 R2 的補給金鑰。
+    #  調用憑證識別器，統一獲取 Supabase 與 R2 的補給金鑰。
     sb_url = get_secret("SUPABASE_URL")
     sb_key = get_secret("SUPABASE_KEY")
     r2_id = get_secret("R2_ACCESS_KEY_ID")
@@ -118,25 +117,25 @@ def run_transport_and_report():
     now = datetime.now(timezone.utc)
     duty_start = datetime.fromisoformat(tactics['duty_start_at'].replace('Z', '+00:00'))
     
-    # 一行註解：判定 48 小時周期是否已屆，執行計畫性交棒。
+    #  判定 48 小時周期是否已屆，執行計畫性交棒。
     if tactics['active_worker'] == 'GITHUB' and now > duty_start + timedelta(hours=tactics['rotation_hours']):
         print("⏰ [戰術輪替] 週期結束，交棒 Render...")
         update_active_worker(supabase, "RENDER", "ROTATION_SCHEDULE")
         trigger_render_webhook()
         return
 
-    # 一行註解：若目前非 GitHub 執勤，發送喚醒訊號後保持靜默。
+    #  若目前非 GitHub 執勤，發送喚醒訊號後保持靜默。
     if tactics['active_worker'] != 'GITHUB':
         print(f"📡 [轉向] 目前由 {tactics['active_worker']} 執勤，確保 Render 喚醒...")
         if tactics['active_worker'] == 'RENDER': trigger_render_webhook()
         return
 
-    # 一行註解：初始化 AI 智囊團與 Cloudflare R2 傳輸客戶端。
+    #  ：初始化 AI 智囊團與 Cloudflare R2 傳輸客戶端。
     ai_agent = AIAgent()
     s3_client = boto3.client('s3', endpoint_url=f'https://{r2_acc}.r2.cloudflarestorage.com',
                              aws_access_key_id=r2_id, aws_secret_access_key=r2_secret, region_name='auto')
 
-    # 一行註解：從倉庫領取待處理任務，包含最新與歷史積壓物資。
+    #  從倉庫領取待處理任務，包含最新與歷史積壓物資。
     new_m = supabase.table("mission_queue").select("*").filter("status", "eq", "pending") \
         .or_("scrape_status.eq.success,scrape_status.eq.manual_check").order("created_at", desc=True).limit(1).execute()
     
@@ -148,7 +147,7 @@ def run_transport_and_report():
     if not all_missions: return
 
     for index, mission_data in enumerate(all_missions):
-        # 一行註解：在任務序列中插入休息，防止雲端頻率過高觸發封鎖。
+        # 一 在任務序列中插入休息，防止雲端頻率過高觸發封鎖。
         if index > 0: time.sleep(random.randint(120, 300))
 
         source_name = mission_data.get('source_name', 'unknown')
