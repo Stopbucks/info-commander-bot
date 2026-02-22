@@ -19,6 +19,9 @@ def test_koyeb_env():
     print("--- 🔍 環境變數掃描 ---")
     print(f"🌐 URL: {url[:15]}..." if url else "🌐 URL: [MISSING]")
     print(f"🔑 KEY: {key[:10]}..." if key else "🔑 KEY: [MISSING]")
+    # 在 test_kb_supabase.py 中加入長度判讀，用於確認補給品是否完整。
+    print(f"📏 KEY 長度: {len(key) if key else 0} 字元")
+    # 正常的 Supabase Anon Key 通常在 80 字元以上。
 
     if not url or not key:
         print("❌ [失敗] Koyeb 後台環境變數未正確設定。")
