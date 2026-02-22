@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_worker.py v5.7 (語法修正版)
+# 本程式碼：src/pod_scra_worker.py v6.0 (實戰對位版)
 # 職責：領取任務 -> 串流下載 -> 直送 R2 -> 狀態更新
 # ---------------------------------------------------------
 import os
@@ -68,10 +68,14 @@ def run_logistics_mission():
                 task = mission.data[0]
                 task_id = task['id']
                 audio_url = task['audio_url']
-                file_name = f"{task['pub_date']}_{task['title'][:30]}.m4a"
+                
+                # 一行註解：精準對位 episode_title 欄位，並過濾特殊符號防路徑崩潰。
+                clean_title = "".join(c for c in task['episode_title'][:30] if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                # 一行註解：取 pub_date 前10碼(日期)確保檔名簡潔。
+                file_name = f"{task['pub_date'][:10]}_{clean_title}.m4a"
                 temp_path = f"/tmp/{file_name}"
 
-                print(f"🚛 [起運] 偵測到物資: {task['title']}")
+                print(f"🚛 [起運] 偵測到物資: {task['episode_title']}")
 
                 # 一行註解：使用串流下載以節省內存空間。
                 resp = requests.get(audio_url, timeout=60, stream=True)
@@ -82,13 +86,14 @@ def run_logistics_mission():
                         f.write(chunk)
                 
                 if upload_to_r2(temp_path, os.environ.get("R2_BUCKET_NAME"), file_name):
-                    # 一行註解：完成後同步更新資料庫狀態。
+                    # 一行註解：精準對位 r2_url 欄位，並將狀態更新為 completed 吻合資料庫流向。
                     sb.table("mission_queue").update({
-                        "status": "stored_in_r2",
-                        "r2_path": file_name
+                        "status": "completed",
+                        "r2_url": file_name
                     }).eq("id", task_id).execute()
                     print(f"🏆 [結案] 任務 {task_id} 搬運完畢。")
                 
+                # 一行註解：清掃戰場，避免 /tmp 空間爆滿。
                 if os.path.exists(temp_path): os.remove(temp_path)
 
             else:
