@@ -2,52 +2,53 @@
 # 本程式碼：src/test_handoff_call.py v1.5 (資安與語法修正版)
 # 任務：執行端點之通訊協議相容性驗證與握手測試。
 # ---------------------------------------------------------
-import os
-import requests
+
+
+import os, requests, json
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
-# 一行註解：啟動環境配置載入機制。
+# 一行註解：初始化環境配置。
 load_dotenv()
 
-def run_precision_verification():
-    # 一行註解：讀取映射後的環境變數。
-    target_endpoint = os.environ.get("TARGET_A")
-    auth_token = os.environ.get("TOKEN_A")
+def run_legacy_handshake():
+    # 一行註解：讀取映射變數，確保公開倉庫不留原名。
+    target_url = os.environ.get("TARGET_A")
+    secret_key = os.environ.get("TOKEN_A")
     
-    if not target_endpoint or not auth_token:
-        print("❌ [中止] 環境變數配置不全，無法發動。")
+    if not target_url or not secret_key:
+        print("❌ [中止] 缺乏通訊座標或憑證。")
         return
 
-    # 一行註解：對齊接收端(Render)所需之自定義標頭結構。
-    secure_headers = {
-        "X-Cron-Secret": auth_token,
-        "Content-Type": "application/json"
+    # 一行註解：建立與遺產代碼一致的數據負載。
+    data_payload = {
+        "verified_at_utc": datetime.now(timezone.utc).isoformat(),
+        "mission_type": "legacy_handshake_test"
+    }
+    
+    # 🎯 核心回歸：將 secret 放在 JSON Body 內而非 Header。
+    # 一行註解：這是之前 PodcastProcessor 成功發送訊息的關鍵包裝結構。
+    final_payload = {
+        "secret": secret_key, 
+        "data": data_payload
     }
 
-    #---前面變數宣告相同---#
-    # -----(定位線)以下修改語法縮排與輸出邏輯----
-    print(f"📡 [精準衝鋒] 執行協議校驗中...")
+    print(f"📡 [回歸測試] 正在發送 JSON 封裝負載...")
     try:
-        # 一行註解：發送帶有驗證標頭的 POST 請求。
-        resp = requests.post(target_endpoint, headers=secure_headers, timeout=30)
+        # 一行註解：執行 POST 請求，讓 requests 自動處理 JSON 序列化。
+        resp = requests.post(target_url, json=final_payload, timeout=30)
         
-        # 一行註解：輸出狀態碼。
         print(f"📡 [回報] 狀態碼：{resp.status_code}")
-        
-        # 一行註解：限制回應內容輸出長度，保障資安。
         print(f"📡 [回應摘要]：{resp.text[:50]}...")
         
-        if resp.status_code == 202:
-            print(f"🏆 [突破] 成功！目標端點已確認通行證。")
-        elif resp.status_code == 404:
-            print(f"⚠️ [座標偏離] 404！請確認 URL 包含正確路徑尾碼。")
-        elif resp.status_code == 403:
-            print(f"🚫 [驗證失敗] 403！憑證內容不匹配。")
+        if resp.status_code in [200, 202]:
+            print(f"🏆 [突破] 握手成功！遺產邏輯在當前環境依然有效。")
+        else:
+            print(f"⚠️ [未果] 握手失敗，伺服器不接受此封裝格式。")
             
     except Exception:
-        # 一行註解：遮蔽具體連線錯誤細節，防止日誌指紋外洩。
         print("❌ [錯誤] 通訊鏈路實體斷裂。")
 
 if __name__ == "__main__":
-    run_precision_verification()
-# -----(定位線)以上修改完畢-----
+    run_legacy_handshake()
+
