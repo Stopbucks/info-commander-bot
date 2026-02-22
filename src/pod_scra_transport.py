@@ -7,6 +7,7 @@ import os, requests, time, random, boto3, subprocess, json
 from supabase import create_client, Client
 from datetime import datetime, timezone, timedelta
 from podcast_ai_agent import AIAgent 
+from urllib.parse import urlparse
 
 # ==========================================================================
 # --- 🛡️ 核心憑證庫模組 (Vault Module) ---
@@ -30,30 +31,27 @@ def get_secret(key, default=None):
     return os.environ.get(key, default)
 
 
+
 def trigger_render_webhook():
-    """
-    📡 [通訊] 強效喚醒 Render：結合抖動防護與 60 秒長效等待。
-    """
-    # 一行註解：隨機延遲（10-30秒）是為了產生通訊抖動，避開自動化流量偵測。
-    wait_time = random.randint(10, 30)
-    print(f"⏳ [通訊防護] 執行擬態抖動，隨機等待 {wait_time} 秒...")
-    time.sleep(wait_time)
+    # 一行註解：隨機延遲保護通訊通道。
+    time.sleep(random.randint(10, 30))
 
-    # 一行註解：讀取網址並自動補齊端點，確保請求能擊中實戰入口。
+    # 🎯 核心修正：強制解析網域，確保路徑精準鎖定 /fallback。
     raw_url = get_secret("RENDER_WEBHOOK_URL")
-    url = raw_url if "/fallback" in str(raw_url) else str(raw_url).rstrip('/') + "/fallback"
+    parsed = urlparse(raw_url)
+    url = f"{parsed.scheme}://{parsed.netloc}/fallback" # 一行註解：拋棄複雜路徑，強制回歸根網域拼接。
+    
     auth_token = get_secret("CRON_SECRET")
-
-    #  封裝雙重認證與 User-Agent 偽裝，這是目前最穩健的穿透封裝。
     headers = {'X-Cron-Secret': auth_token, 'User-Agent': 'Mozilla/5.0'}
     payload = {'secret': auth_token, 'data': {'cmd': 'transport_handoff', 'origin': 'github_action'}}
 
     try:
-        #  將超時上限設為 60 秒，給予 Render Free 階層充足的冷啟動緩衝時間。
+        # 一行註解：發射握手訊號，Timeout 設定為 60s 給予基地充分喚醒時間。
         res = requests.post(url, json=payload, headers=headers, timeout=60)
         print(f"📡 [呼叫結果] 狀態碼：{res.status_code}")
     except Exception as e:
-        print(f"⚠️ [呼叫異常] 通訊實體斷裂：{e}")
+        print(f"⚠️ [呼叫異常]：{e}")
+
 # ==========================================================================
 # --- ⚔️ 戰術核心模組 (Tactics Module) ---
 # ==========================================================================
