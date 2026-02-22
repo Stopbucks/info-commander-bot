@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       force_mode:
-        description: '🚀 選擇作戰模式 (AUTO 為自動決策)'
+        description: '🚀 選擇作戰模式'
         required: true
         default: 'AUTO'
         type: choice
@@ -20,9 +20,8 @@ on:
           - AUTO
           - MODE_1_Scrapi
           - MODE_2_Zenrows
-          - MODE_3_Webscrap
+          - MODE_3_Hasdata # 原本的 Webscrap 改為 Hasdata。
           - MODE_4_Scrapedo
-
 jobs:
   relay_mission:
     runs-on: ubuntu-latest
@@ -40,7 +39,7 @@ jobs:
         
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      
+
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       
@@ -48,7 +47,8 @@ jobs:
       ZENROWS_API_KEY: ${{ secrets.ZENROWS_API_KEY }}
       WEBSCRAP_API_KEY: ${{ secrets.WEBSCRAP_API_KEY }} # 🚀 修正：對位法定清單
       SCRAPEDO_API_KEY: ${{ secrets.SCRAPEDO_API_KEY }} # 🚀 修正：對位法定清單
-
+      HASDATA_API_KEY: ${{ secrets.HASDATA_API_KEY }}
+      
 # 🚀 補齊：接力通訊組件 (若無此二項，Render 無法被喚醒)
       RENDER_WEBHOOK_URL: ${{ secrets.RENDER_WEBHOOK_URL }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
