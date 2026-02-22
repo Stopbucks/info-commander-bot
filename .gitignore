@@ -2,20 +2,31 @@
 config/
 service-account.json
 .env
+*.key
+*.pem
 
-# --- 📦 地端倉庫與數據 (禁止上傳) ---
+# --- 📦 地端倉庫/ 資料夾與數據 (禁止上傳) ---
 archive/
 node_modules/
 workspace/
 history_data/
-daily_checkpoint.json
+__pycache__/
+.venv/
+venv/
+ 
+
+# --- 🛰️ 代理與專案特定數據 (資安強化) ---
+podcast_flyproxy_jp/
+podcast_flyproxy_la/
+
+
+# --- 防堵所有備份檔與變體 ---
+*.bak
+daily_checkpoint.json*
+*.pyc
 *.mp3
 *.txt
 !requirements.txt
 *.json.info
-# --- 防堵所有備份檔與變體 ---
-*.bak
-daily_checkpoint.json*
-__pycache__/
-.venv/
-*.pyc
+
+daily_checkpoint.json
