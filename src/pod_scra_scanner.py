@@ -47,6 +47,13 @@ def fetch_html(provider_key, target_url, keys):
             params = {'url': target_url, 'js_render': 'true', 'proxy_type': 'residential'}
             return requests.get('https://api.hasdata.com/scrape', headers=headers, params=params, timeout=TO)
 
+        # 6. 通用全能：ScrapingAnt (1,000 點/月，穩定 JS 渲染步兵，每月23日renew )
+        elif provider_key == "SCRAPINGANT":
+            # 🎯 擅長一般 JS 動態頁面，適合處理 Podbay 的內容提取。
+            encoded_url = urllib.parse.quote(target_url)
+            api_url = f"https://api.scrapingant.com/v2/general?url={encoded_url}&x-api-key={current_key}&browser=true"
+            return requests.get(api_url, timeout=TO)
+        
         return None
     
     except Exception as e:
