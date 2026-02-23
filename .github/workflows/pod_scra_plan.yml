@@ -54,6 +54,8 @@ jobs:
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
       PYTHONUNBUFFERED: 1
 
+# ... (前面 env 部分相同，保留所有 Secret) ...
+
     steps:
     - name: 📦 檢出程式碼
       uses: actions/checkout@v4
@@ -65,26 +67,26 @@ jobs:
         cache: 'pip'
 
     - name: ⚙️ 安裝必要依賴與 FFmpeg
-      # 一行註解：安裝音訊壓縮所需工具 ffmpeg。
+      # 🚀 提醒：FFmpeg 必須留下，供 v3.1 版 Transport 進行 AI 前置壓縮
       run: |
         sudo apt-get update && sudo apt-get install -y ffmpeg
         python -m pip install --upgrade pip
         pip install requests beautifulsoup4 supabase python-dotenv boto3 google-generativeai groq
 
-    - name: 🎯 執行解碼任務 (Officer)
-      # 一行註解：僅保留此步驟特有的戰略切換變數。
+    - name: 🎯 執行偵察任務 (Officer)
       env:
         STRATEGY_MODE: ${{ github.event.inputs.force_mode || 'AUTO' }}
       run: |
-        echo "📡 [啟動] 解碼官執行任務，當前戰略模式: $STRATEGY_MODE"
+        echo "📡 [啟動] 解碼官出擊，目前 Officer v7.2 將強制使用 HASDATA 住宅代理模式"
         python src/pod_scra_officer.py
 
-    - name: 🕒 戰術觀察期 (等待解碼官完成物資入庫)
-      run: sleep 300 
+    - name: 🕒 戰術緩衝 (讓雲端運輸兵有時間接單)
+      # 🚀 說明：雖然解耦了，但留 60 秒讓 Supabase 狀態更新同步也是好事
+      run: sleep 60 
 
-    - name: 🚚 執行運輸、音訊壓縮與 AI 摘要
+    - name: 📝 執行情報提煉與報戰 (Transport/Reporter)
+      # 🚀 任務：從 R2 下載 Worker 搬好的檔案 -> 壓縮 -> AI 摘要 -> Telegram
       run: python src/pod_scra_transport.py
 
-    - name: 🧹 執行兩階段庫存重生與清理
-      # 一行註解：在最後階段清理或重生 7/14 天前的任務。
+    - name: 🧹 執行倉庫大掃除 (Cleaner)
       run: python src/pod_scra_cleaner.py
