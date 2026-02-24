@@ -6,7 +6,7 @@
 import requests, urllib.parse, random
 
 def fetch_html(provider_key, target_url, keys):
-    TO = 60 # 統一 60 秒超時，應對渲染場景
+    TO = 90 #  90 秒超時，應對住宅IP & 渲染場景
     
     # 支援多組 API Key：處理 ScraperAPI 等多帳號輪詢
     current_key = keys.get(provider_key)
