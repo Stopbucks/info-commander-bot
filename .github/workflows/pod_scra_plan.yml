@@ -48,7 +48,15 @@ jobs:
       WEBSCRAP_API_KEY: ${{ secrets.WEBSCRAP_API_KEY }} # 🚀 修正：對位法定清單
       SCRAPEDO_API_KEY: ${{ secrets.SCRAPEDO_API_KEY }} # 🚀 修正：對位法定清單
       HASDATA_API_KEY: ${{ secrets.HASDATA_API_KEY }}
-      
+      # --- 在 pod_scra_plan.yml 的 env: 區塊末端加入 ---
+
+# --- 在 pod_scra_plan.yml 的 env: 區塊末端加入 ---
+
+      # 🚀 指導官補發：ScrapingAnt 渲染引擎金鑰
+      SCRAPINGANT_API_KEY: ${{ secrets.SCRAPINGANT_API_KEY }}
+      # 🚀 指導官補發：ScraperAPI 第二把金鑰 (5000點)
+      SCRAP_API_KEY_V2: ${{ secrets.SCRAP_API_KEY_V2 }}
+
 # 🚀 補齊：接力通訊組件 (若無此二項，Render 無法被喚醒)
       RENDER_WEBHOOK_URL: ${{ secrets.RENDER_WEBHOOK_URL }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}

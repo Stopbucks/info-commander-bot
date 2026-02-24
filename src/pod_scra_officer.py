@@ -9,8 +9,8 @@ from bs4 import BeautifulSoup
 from pod_scra_scanner import fetch_html 
 
 # === 🛠️ 偵察控制面板 ===
-SCAN_LIMIT = 1                 
-FORCE_PROVIDER = "SCRAPINGANT" # 🚀 演習目標：啟動真實瀏覽器渲染引擎
+SCAN_LIMIT = 1                 # 🚀 提醒：此變數目前僅作參考，下方硬編碼區塊請也記得改
+FORCE_PROVIDER = "SCRAPINGANT" # 演習目標：啟動真實瀏覽器渲染引擎
 # =========================
 
 def get_secret(key, default=None):
@@ -22,26 +22,26 @@ def get_secret(key, default=None):
 
 def run_scra_officer():
     # 🚀 擬態裝備庫：Windows 聯軍 (針對渲染引擎進行標頭優化)
-    # 註：ScrapingAnt 通常會自動處理部分標頭，但手動注入一致性標頭可增加隱身權重
     SCRAPER_PERSONAS = [
         {
-            "label": "Win11_Chrome_Ant", # 第一套裝備
-            "key": get_secret("SCRAPINGANT_API_KEY"), # 🚀 修正：抓取正確的 Ant 金鑰
+            "label": "Win11_Chrome_Ant",
+            "key": get_secret("SCRAPINGANT_API_KEY"),
             "headers": {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
                 "Sec-Ch-Ua-Platform": '"Windows"',
                 "Connection": "keep-alive"
             }
         }
-        # 如果您有第二組 ScrapingAnt 金鑰，可在此比照辦理新增 V2
     ]
     
     sb = create_client(get_secret("SUPABASE_URL"), get_secret("SUPABASE_KEY"))
-    print(f"🚀 [渲染演習] 模式: {FORCE_PROVIDER} | 執行 5 筆 JS 強制渲染測試...")
+    print(f"🚀 [渲染演習] 模式: {FORCE_PROVIDER} | 啟動 JS 強制渲染測試...")
 
+    # === 🚧 戰術硬編碼注意區 (過渡時期手動調整處) ===
+    # 若要真正「只抓一筆」，請將下方 limit(3) 改為 limit(1)，且 limit(2) 改為 limit(0)
     new_m = sb.table("mission_queue").select("*").eq("scrape_status", "pending").order("created_at", desc=True).limit(3).execute()
     old_m = sb.table("mission_queue").select("*").eq("scrape_status", "pending").order("created_at", desc=False).limit(2).execute()
+    # =============================================
     
     all_missions = new_m.data + old_m.data
     total_count = len(all_missions)
@@ -58,13 +58,13 @@ def run_scra_officer():
 
         for persona in SCRAPER_PERSONAS:
             if not persona["key"]: 
-                print(f"⚠️ 找不到 {FORCE_PROVIDER} 的金鑰，請檢查 Secrets 設定！")
+                print(f"⚠️ 找不到 {FORCE_PROVIDER} 的金鑰，請檢查 YAML env 與 Secrets 設定！")
                 continue
             
             active_persona_label = persona["label"]
             print(f"📡 [偵察 {idx+1}/{total_count}] 使用裝備: {active_persona_label} 對位 {podbay_slug}...")
             
-            # 🚀 關鍵修正：將金鑰標籤動態對位至 FORCE_PROVIDER
+            # 🚀 自動對位金鑰：確保 Ant 金鑰能正確傳遞給渲染引擎
             current_all_keys = {FORCE_PROVIDER: [persona["key"]]}
             
             try:
@@ -76,7 +76,7 @@ def run_scra_officer():
                     break 
                 elif resp and resp.status_code in [403, 429]:
                     wait_sec = random.randint(300, 600)
-                    print(f"🛑 [Ant 火力中斷] 休眠 {wait_sec//60} 分鐘...")
+                    print(f"🛑 [點數枯竭] 休眠 {wait_sec//60} 分鐘避震...")
                     time.sleep(wait_sec)
                     continue 
                 else:
@@ -88,7 +88,6 @@ def run_scra_officer():
         # --- 數據歸檔 (寫入 recon_persona 欄位) ---
         if recon_success:
             soup = BeautifulSoup(final_resp.text, 'html.parser')
-            # 💡 ScrapingAnt 渲染後的 HTML 通常包含展開後的音檔標籤
             audio_meta = soup.find('meta', property=re.compile(r'(og:audio|twitter:player:stream)'))
             final_url = audio_meta.get('content') if audio_meta else None
             
@@ -101,7 +100,7 @@ def run_scra_officer():
                 "last_scraped_at": now_iso, 
                 "scrape_count": current_count
             }).eq("id", task_id).execute()
-            print(f"{'✅' if final_url else '🔎'} [完成] {podbay_slug} (使用:{active_persona_label})")
+            print(f"{'✅' if final_url else '🔎'} [完成] {podbay_slug}")
         else:
             status_code = final_resp.status_code if final_resp else 'N/A'
             sb.table("mission_queue").update({
@@ -114,7 +113,7 @@ def run_scra_officer():
         # --- [序列化戰術間歇] ---
         if idx < total_count - 1:
             task_gap = random.randint(60, 180) 
-            print(f"⏳ [節奏控制] 休眠 {task_gap} 秒後處理下一筆任務...")
+            print(f"⏳ [節奏控制] 任務間隔休息 {task_gap} 秒...")
             time.sleep(task_gap)
 
 if __name__ == "__main__":
