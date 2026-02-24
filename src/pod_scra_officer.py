@@ -10,7 +10,7 @@ from pod_scra_scanner import fetch_html
 
 # === 🛠️ 偵察控制面板 ===
 SCAN_LIMIT = 5                 # 5 筆壓力測試模式
-FORCE_PROVIDER = "SCRAPERAPI" 
+FORCE_PROVIDER =  "SCRAPINGANT"   #其他模式有："SCRAPERAPI"、...待補
 # =========================
 
 def get_secret(key, default=None):
