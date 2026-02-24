@@ -1,15 +1,10 @@
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_transport.py v3.0 (情報轉型版)
-# 任務：專注於已完成(completed)物資的 AI 摘要與 Telegram 報戰
+# 本程式碼：src/pod_scra_transport.py v3.4 (情報入庫版)
+# 任務：領取已入庫物資 -> AI 提煉 -> 寫入 mission_intel 新表 -> TG 報戰
 # ---------------------------------------------------------
-# ---------------------------------------------------------
-# 本程式碼：src/pod_scra_transport.py v3.1 (階梯延時版)
-# 任務：已入庫物資分析、Opus 極限壓縮、階梯式 Jitter 避震
-# ---------------------------------------------------------
-
-import os, requests, time, random, boto3, subprocess, json
+import os, requests, time, random, boto3, subprocess, json, re
+from datetime import datetime
 from supabase import create_client, Client
-from datetime import datetime, timezone, timedelta
 from podcast_ai_agent import AIAgent 
 
 def get_secret(key, default=None):
@@ -19,88 +14,100 @@ def get_secret(key, default=None):
             vault = json.load(f); return vault.get("active_credentials", {}).get(key, default)
     return os.environ.get(key, default)
 
+def parse_intel_metrics(text):
+    """從 AI 文本中提取量化指標 (用於填寫 mission_intel 欄位)"""
+    metrics = {"score": 0, "stated": 0, "inferred": 0, "subjective": 0, "evidence": 0}
+    try:
+        s_match = re.search(r"綜合情報分 \(Total Score\): (\d+)", text)
+        if s_match: metrics["score"] = int(s_match.group(1))
+        e_match = re.search(r"關鍵實證數：(\d+)", text)
+        if e_match: metrics["evidence"] = int(e_match.group(1))
+        v_match = re.findall(r": (\d+) 分", text)
+        if len(v_match) >= 3:
+            metrics["stated"], metrics["inferred"], metrics["subjective"] = map(int, v_match[:3])
+    except: pass
+    return metrics
+
 def run_transport_and_report():
-    # === 🛠️ 情報部控制面板 ===
-    INTEL_LIMIT = 3               # 每次處理 3 筆，防止 GitHub 3小時超時
-    JITTER_BASE_MIN = 10          # 休息基數最小值 (10分鐘)
-    JITTER_BASE_MAX = 20          # 休息基數最大值 (20分鐘)
+    # === 🛠️ 戰區控制面板 ===
+    INTEL_LIMIT = 3               # 每次處理 3 筆
+    JITTER_BASE_MIN, JITTER_BASE_MAX = 10, 20
     # =========================
 
-    sb_url = get_secret("SUPABASE_URL")
-    sb_key = get_secret("SUPABASE_KEY")
-    r2_id = get_secret("R2_ACCESS_KEY_ID")
-    r2_secret = get_secret("R2_SECRET_ACCESS_KEY")
-    r2_acc = get_secret("R2_ACCOUNT_ID")
-    r2_bucket = get_secret("R2_BUCKET_NAME", "pod-scra-vault")
-    
-    if not all([sb_url, sb_key, r2_id, r2_secret, r2_acc]):
-        print("❌ [補給中斷] 憑證缺失。"); return
-    
-    supabase: Client = create_client(sb_url, sb_key)
+    sb_url, sb_key = get_secret("SUPABASE_URL"), get_secret("SUPABASE_KEY")
+    r2_id, r2_secret = get_secret("R2_ACCESS_KEY_ID"), get_secret("R2_SECRET_ACCESS_KEY")
+    r2_acc, r2_bucket = get_secret("R2_ACCOUNT_ID"), get_secret("R2_BUCKET_NAME", "pod-scra-vault")
+    tg_token, tg_chat_id = get_secret("TELEGRAM_BOT_TOKEN"), get_secret("TELEGRAM_CHAT_ID")
+
+    sb: Client = create_client(sb_url, sb_key)
     ai_agent = AIAgent()
-    s3_client = boto3.client('s3', 
-        endpoint_url=f'https://{r2_acc}.r2.cloudflarestorage.com',
-        aws_access_key_id=r2_id, 
-        aws_secret_access_key=r2_secret, 
-        region_name='auto')
+    s3 = boto3.client('s3', endpoint_url=f'https://{r2_acc}.r2.cloudflarestorage.com',
+                      aws_access_key_id=r2_id, aws_secret_access_key=r2_secret, region_name='auto')
 
-    # 🎯 領取 Worker 已完成但尚未分析的任務
-    missions = supabase.table("mission_queue").select("*")\
-        .eq("status", "completed")\
-        .is_("summary", "null")\
-        .order("created_at", desc=True).limit(INTEL_LIMIT).execute()
+    # 🎯 [關鍵改動]：改為檢查 mission_intel 表，若該任務 ID 不在其中，代表尚未產出摘要
+    res = sb.table("mission_queue").select("id, r2_url, episode_title, source_name, audio_url")\
+            .eq("status", "completed").order("created_at", desc=True).limit(20).execute()
+    
+    # 篩選出尚未在 mission_intel 中建立檔案的任務
+    pending_intel = []
+    for m in res.data:
+        check = sb.table("mission_intel").select("id").eq("task_id", m['id']).execute()
+        if not check.data: pending_intel.append(m)
+        if len(pending_intel) >= INTEL_LIMIT: break
 
-    if not missions.data:
-        print("☕ [情報部] 暫無新入庫物資需要提煉。"); return
+    if not pending_intel:
+        print("☕ [情報部] 檔案館已滿載，暫無待提煉物資。"); return
 
-    total_tasks = len(missions.data)
-    print(f"📦 [掃描雷達] 發現 {total_tasks} 筆情報待處理。")
+    print(f"📦 [掃描雷達] 發現 {len(pending_intel)} 筆情報待入庫。")
 
-    for idx, task in enumerate(missions.data):
+    for idx, task in enumerate(pending_intel):
         task_id = task['id']
-        r2_file_key = task.get('r2_url')
-        episode_title = task.get('episode_title', 'Untitled')
-        
-        local_raw = f"/tmp/raw_{idx}.m4a"
-        local_opus = f"/tmp/proc_{idx}.opus"
+        r2_key = task.get('r2_url')
+        local_raw, local_opus = f"/tmp/raw_{idx}.m4a", f"/tmp/proc_{idx}.opus"
 
         try:
-            print(f"📡 [提領 {idx+1}/{total_tasks}] 從 R2 倉庫提取: {r2_file_key}")
-            s3_client.download_file(r2_bucket, r2_file_key, local_raw)
+            print(f"📡 [提取] 正在從金庫提取物資: {r2_key}")
+            s3.download_file(r2_bucket, r2_key, local_raw)
 
-            # ⚙️ 執行 Opus 技術壓縮 (必須保留 FFmpeg)
-            print("⚙️ [處理] FFmpeg 啟動，執行音訊規格優化...")
             subprocess.run(['ffmpeg', '-y', '-i', local_raw, '-ar', '16000', '-ac', '1', '-c:a', 'libopus', '-b:a', '24k', local_opus], 
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # 🧠 調用 AI 智囊團
-            print(f"🧠 [思考] Gemini/Groq 正在解構情報...")
+            print(f"🧠 [摘要] AI 智囊團正在煉金...")
             analysis, q_score, duration = ai_agent.generate_gold_analysis(local_opus)
 
             if analysis:
-                # 📡 發送戰報
-                report_msg = ai_agent.format_mission_report("Gold", episode_title, "N/A", analysis, 
-                                                            datetime.now().strftime("%m/%d"), duration, task.get('source_name'))
-                requests.post(f"https://api.telegram.org/bot{get_secret('TELEGRAM_BOT_TOKEN')}/sendMessage", 
-                              json={"chat_id": get_secret("TELEGRAM_CHAT_ID"), "text": report_msg, "parse_mode": "Markdown"})
-
-                # 🏆 任務存檔
-                supabase.table("mission_queue").update({"summary": analysis}).eq("id", task_id).execute()
-                print(f"✅ [成功] 任務 {task_id} 提煉完成。")
-
-            # ⏳ 執行指揮官要求的「階梯式 Jitter」延時邏輯
-            if idx < total_tasks - 1:
-                # 休息時間 = (已處理個數) * random(10~20分鐘)
-                # 例如傳完第 2 個 (idx=1), 休息 = 2 * random_min
-                multiplier = idx + 1
-                wait_mins = multiplier * random.randint(JITTER_BASE_MIN, JITTER_BASE_MAX)
+                metrics = parse_intel_metrics(analysis)
                 
-                print(f"🚧 [階梯防護] 已處理 {multiplier} 筆任務。")
-                print(f"⏳ 為防 API 封鎖，啟動冷卻機制：休眠 {wait_mins} 分鐘...")
+                # 📡 [情報存儲]：將摘要寫入獨立的 mission_intel 表，保持主表清爽
+                sb.table("mission_intel").insert({
+                    "task_id": task_id,
+                    "summary_text": analysis,
+                    "total_score": metrics["score"],
+                    "evidence_count": metrics["evidence"],
+                    "stated_value": metrics["stated"],
+                    "inferred_trust": metrics["inferred"],
+                    "subjective_value": metrics["subjective"],
+                    "ai_model": "Gemini-1.5-Pro",
+                    "report_date": datetime.now().strftime("%m/%d/%y")
+                }).execute()
+
+                # 📡 [報戰發布]
+                report_msg = ai_agent.format_mission_report(
+                    "Gold", task.get('episode_title'), task.get('audio_url'), analysis, 
+                    datetime.now().strftime("%m/%d"), duration, task.get('source_name')
+                )
+                requests.post(f"https://api.telegram.org/bot{tg_token}/sendMessage", 
+                              json={"chat_id": tg_chat_id, "text": report_msg, "parse_mode": "Markdown"})
+                
+                print(f"✅ [成功] 任務 {task_id} 情報已入庫並發布。")
+
+            if idx < len(pending_intel) - 1:
+                wait_mins = (idx + 1) * random.randint(JITTER_BASE_MIN, JITTER_BASE_MAX)
+                print(f"🕒 [避震] 冷卻 {wait_mins} 分鐘...")
                 time.sleep(wait_mins * 60)
 
         except Exception as e:
-            print(f"⚠️ [情報異常]：{e}")
+            print(f"💥 [崩潰]: {e}")
         finally:
             for f in [local_raw, local_opus]:
                 if os.path.exists(f): os.remove(f)
