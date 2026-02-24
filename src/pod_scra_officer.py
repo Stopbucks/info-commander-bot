@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from pod_scra_scanner import fetch_html 
 
 # === 🛠️ 偵察控制面板 ===
-SCAN_LIMIT = 5                 
+SCAN_LIMIT = 1                 
 FORCE_PROVIDER = "SCRAPINGANT" # 🚀 演習目標：啟動真實瀏覽器渲染引擎
 # =========================
 
