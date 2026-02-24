@@ -28,7 +28,7 @@ def fetch_html(provider_key, target_url, keys):
 
         # 3. 轉運專員：WEBSCRAPING (2,000 點/月，性價比之選)
         elif provider_key == "WEBSCRAPING":
-            # 🎯 擅長處理轉址。若 Hasdata 告急，此為第一順位接替者。
+            # 🎯 擅長處理轉址。擔任敲門解析最終網址。
             params = {'api_key': current_key, 'url': target_url, 'js': 'true'}
             return requests.get('https://api.webscraping.ai/html', params=params, timeout=TO)
 
