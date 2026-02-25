@@ -2,6 +2,7 @@
 # ---------------------------------------------------------#  
 # 本程式碼：src/pod_scra_officer.py v8.1 (全域攻堅版)
 # 任務：ScrapingAnt 渲染、全域正則掃描、<a>標籤解析、偵察員履歷蓋章
+# 兵力： "SCRAPERAPI"、"WEBSCRAPING"、"SCRAPEDO"、"HASDATA"、"SCRAPINGANT"
 # ---------------------------------------------------------
 import os, requests, time, re, json, random
 from datetime import datetime, timezone
@@ -9,7 +10,8 @@ from supabase import create_client, Client
 from bs4 import BeautifulSoup
 from pod_scra_scanner import fetch_html 
 
-FORCE_PROVIDER = "SCRAPINGANT" 
+
+FORCE_PROVIDER = "SCRAPERAPI"
 
 def get_secret(key, default=None):
     vault_path = "/etc/secrets/render_secret_vault.json"
@@ -29,12 +31,12 @@ def run_scra_officer():
     # === 🚧 戰術注意區：調整任務領取配額 (limit) ===
     new_m = (sb.table("mission_queue").select("*").eq("scrape_status", "pending")
              .order("created_at", desc=True)
-             .limit(2)    # 👈 [修改此處：新任務筆數]
+             .limit(3)    # 👈 [修改此處：新任務筆數]
              .execute())
 
     old_m = (sb.table("mission_queue").select("*").eq("scrape_status", "pending")
              .order("created_at", desc=False)
-             .limit(0)    # 👈 [修改此處：舊任務筆數]
+             .limit(2)    # 👈 [修改此處：舊任務筆數]
              .execute())
     # =============================================
     
