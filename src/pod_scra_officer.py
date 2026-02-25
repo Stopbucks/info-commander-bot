@@ -11,7 +11,7 @@ from pod_scra_scanner import fetch_html
 
 # === 🛠️ 偵察控制面板 (策略中樞) ===
 # 1=SCRAPERAPI, 2=WEBSCRAPING, 3=SCRAPEDO, 4=HASDATA, 5=SCRAPINGANT
-ACTIVE_STRATEGY = 5  # 🚀 [明日測試：1，今日演習：5]
+ACTIVE_STRATEGY = 1  # 🚀 [明日測試：1，今日演習：5]
 
 STRATEGY_MAP = {
     1: {"provider": "SCRAPERAPI", "label": "Win11_Chrome_Premium", "key_name": "SCRAP_API_KEY_V2"},
@@ -36,7 +36,9 @@ def run_scra_officer():
     sb = create_client(get_secret("SUPABASE_URL"), get_secret("SUPABASE_KEY"))
     print(f"🚀 [行動啟動] 策略: {ACTIVE_STRATEGY} | 兵種: {persona_label}")
 
-    # === 🚧 戰術注意區：調整任務領取配額 (小螢幕括號法) ===
+    # === 🚧 戰術注意區：調整任務領取配額 ===
+    # 硬編碼區  (小螢幕括號法)
+    # ---------------------------------------
     new_m = (sb.table("mission_queue").select("*").eq("scrape_status", "pending")
              .order("created_at", desc=True)
              .limit(1)    # 👈 [新任務配額]
@@ -44,7 +46,7 @@ def run_scra_officer():
 
     old_m = (sb.table("mission_queue").select("*").eq("scrape_status", "pending")
              .order("created_at", desc=False)
-             .limit(0)    # 👈 [舊任務配額]
+             .limit(1)    # 👈 [舊任務配額]
              .execute())
     # ===================================================
     
