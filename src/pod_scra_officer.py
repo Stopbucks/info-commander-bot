@@ -1,16 +1,16 @@
+
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_officer.py v8.4 (分級補位版)
-# 任務：1-5 兵種切換、4天緩衝判定、RSS優先、分級補位
+# 本程式碼：src/pod_scra_officer.py v8.5 (自適性調度版)
+# 任務：1-5 兵種切換、1.5F+2 自適性緩衝、頻率學習更新
 # ---------------------------------------------------------
-import os, requests, time, re, json, random
+import os, requests, time, re, json, random, math
 from datetime import datetime, timezone, timedelta
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
 from pod_scra_scanner import fetch_html 
 
 # === 🛠️ 偵察控制面板 (策略中樞) ===
-# 1=SCRAPERAPI, 2=WEBSCRAPING, 3=SCRAPEDO, 4=HASDATA, 5=SCRAPINGANT
-ACTIVE_STRATEGY = 1  # 👈 [修改此數字即可更換全套兵種]
+ACTIVE_STRATEGY = 1  # 👈 [1=Premium, 5=Ant]
 
 STRATEGY_MAP = {
     1: {"provider": "SCRAPERAPI", "label": "Win11_Chrome_Premium", "key_name": "SCRAP_API_KEY_V2"},
@@ -35,94 +35,97 @@ def run_scra_officer():
     
     print(f"🚀 [行動啟動] 策略: {ACTIVE_STRATEGY} | 兵種: {persona_label}")
 
-    # === 🚧 戰術注意區：調整任務領取配額 (小螢幕括號排版) ===
-    # 領取邏輯：由 mission_queue 聯表 mission_program_master 獲取 wait_days
-    # -------------------------------------------------------
+    # === 🚧 戰術配額區 (小螢幕括號法) ===
+    # 聯表查詢：從 mission_program_master 獲取更新頻率與預設權限
     new_m = (sb.table("mission_queue")
              .select("*, mission_program_master(*)")
              .eq("scrape_status", "pending")
              .order("created_at", desc=True)
-             .limit(1)    # 👈 [新任務配額]
-             .execute())
+             .limit(1).execute())
 
     old_m = (sb.table("mission_queue")
              .select("*, mission_program_master(*)")
              .eq("scrape_status", "pending")
              .order("created_at", desc=False)
-             .limit(1)    # 👈 [舊任務配額]
-             .execute())
-    # ========================================================
+             .limit(1).execute())
+    # ===================================
     
     all_missions = new_m.data + old_m.data
     now_utc = datetime.now(timezone.utc)
 
     for idx, mission in enumerate(all_missions):
-        task_id = mission['id']
-        podbay_slug = str(mission.get('podbay_slug') or "").strip()
-        history = str(mission.get('recon_persona') or "")
+        task_id, podbay_slug, history = mission['id'], str(mission.get('podbay_slug') or "").strip(), str(mission.get('recon_persona') or "")
         current_count = (mission.get('scrape_count') or 0) + 1
-        
-        # 🛡️ 戰術判定 A：檢查 3-4 天緩衝期 (禮讓部隊一)
-        master_data = mission.get('mission_program_master')
-        wait_days = master_data.get('wait_days', 0) if master_data else 0
+        master = mission.get('mission_program_master')
         pub_date = datetime.fromisoformat(mission['pub_date'].replace('Z', '+00:00'))
+
+        # ---------------------------------------------------------
+        # 🛡️ 戰術判定：自適性緩衝計算 (Adaptive Buffer Logic)
+        # 公式設計：D = 1.5F + 2
+        # D: 部隊二接手天數 (Transfer Threshold)
+        # F: 節目更新頻率 (Frequency in Days)
+        # ---------------------------------------------------------
+        # 若主表 wait_days 設為 0，代表 11-18 號目標，部隊二即刻接手
+        if master and master.get('wait_days') == 0:
+            threshold_days = 0
+        else:
+            freq = master.get('update_frequency_days', 1) if master else 1
+            threshold_days = math.ceil(1.5 * freq + 2) # 👈 [工程師驚嘆點：線性擴張法]
         
-        if now_utc < (pub_date + timedelta(days=wait_days)):
-            print(f"🕒 [靜默等待] {podbay_slug} 尚在部隊一負責期 ({wait_days}天)，部隊二不介入。")
+        if now_utc < (pub_date + timedelta(days=threshold_days)):
+            print(f"🕒 [緩衝期] {podbay_slug} (F:{freq}D -> 門檻:{threshold_days}D) 由部隊一防守中。")
             continue
 
-        # 🛡️ 戰術判定 B：履歷章制度 (避免重複無效點數)
+        # 🛡️ 履歷重複性檢查
         if persona_label in history:
-            print(f"⏭️ [跳過] {persona_label} 曾偵察過 {podbay_slug}，等待輪替。"); continue
+            print(f"⏭️ [跳過] {persona_label} 曾失敗過，待輪替。"); continue
 
-        print(f"📡 [偵察 {idx+1}/{len(all_missions)}] 正在攻堅 {podbay_slug}...")
+        print(f"📡 [偵察 {idx+1}/{len(all_missions)}] 攻堅 {podbay_slug}...")
 
-        # 🚀 執行偵察行為 (優先嘗試從 RSS/官網/Podbay 提取)
         try:
-            # 優先檢查是否已有 master RSS 可直接使用 (不需要再掃描網頁)
+            # 🚀 學習模組：更新該節目的頻率資訊 (若有上集發布紀錄)
+            if master and master.get('last_pub_date'):
+                last_pub = datetime.fromisoformat(master['last_pub_date'].replace('Z', '+00:00'))
+                if pub_date > last_pub:
+                    new_freq = (pub_date - last_pub).days
+                    if new_freq > 0:
+                        sb.table("mission_program_master").update({"update_frequency_days": new_freq, "last_pub_date": pub_date.isoformat()}).eq("podbay_slug", podbay_slug).execute()
+                        print(f"📈 [學習] 偵測到頻率變動，已更新 F={new_freq}")
+
+            # 🚀 偵察行為執行 (優先檢查 RSS，再進行網頁地毯掃描)
             final_audio_url = None
-            if master_data and master_data.get('rss_feed_url'):
-                # 這裡未來可擴充 RSS 解析邏輯，目前我們先標註已掌握 RSS
-                print(f"🔑 [情報優勢] 已掌握該節目 RSS: {master_data['rss_feed_url']}")
-            
-            # 若無直接連結，啟動對位掃描
+            if master and master.get('rss_feed_url'):
+                print(f"🔑 [情報優勢] 使用已存 RSS 下載路徑。")
+
             resp = fetch_html(provider, f"https://podbay.fm/p/{podbay_slug}", {provider: api_key})
             if resp and resp.status_code == 200:
                 soup = BeautifulSoup(resp.text, 'html.parser')
                 final_rss_url = None
 
-                # 1. 地毯搜索：音檔連結 (<a> -> Meta -> Regex)
+                # 解析：音檔網址
                 for a in soup.find_all('a', href=True):
                     href, txt = a['href'].lower(), a.get_text().upper()
                     if ('DOWNLOAD' in txt or 'MP3' in txt) and any(k in href for k in ['podtrac', 'megaphone', 'pdst', 'pscrb', 'akamaized']):
                         final_audio_url = a['href']; break
                 
-                if not final_audio_url:
-                    meta = soup.find('meta', property=re.compile(r'(og:audio|twitter:player:stream)'))
-                    final_audio_url = meta.get('content') if meta else None
+                # 解析：RSS FEED (若主表未紀錄，自動補全)
+                if not master or not master.get('rss_feed_url'):
+                    rtag = soup.find('link', type='application/rss+xml', href=True)
+                    final_rss_url = rtag['href'] if rtag else None
 
-                # 2. 地毯搜索：RSS FEED 連結 (若主表沒有，順手牽羊抓回來)
-                if not master_data or not master_data.get('rss_feed_url'):
-                    rss_tag = soup.find('link', type='application/rss+xml', href=True)
-                    final_rss_url = rss_tag['href'] if rss_tag else None
-                    if not final_rss_url:
-                        for a in soup.find_all('a', href=True):
-                            if 'RSS' in a.get_text().upper(): final_rss_url = a['href']; break
-
-                # --- 數據歸檔 ---
-                now_iso = datetime.now(timezone.utc).isoformat()
+                # 數據歸檔與履歷蓋章
                 updated_history = history + (" | " if history else "") + persona_label
-                update_data = {"recon_persona": updated_history, "last_scraped_at": now_iso, "scrape_count": current_count}
+                upd = {"recon_persona": updated_history, "last_scraped_at": now_utc.isoformat(), "scrape_count": current_count}
                 
                 if final_audio_url:
-                    update_data.update({"audio_url": final_audio_url, "scrape_status": "success", "used_provider": f"{provider}_{persona_label}"})
-                    if final_rss_url: update_data["podbay_url"] = final_rss_url
-                    print(f"✅ [大捷] 已獲取連結。")
+                    upd.update({"audio_url": final_audio_url, "scrape_status": "success", "used_provider": f"{provider}_{persona_label}"})
+                    if final_rss_url: upd["podbay_url"] = final_rss_url # 標記以便後續回填 master
+                    print(f"✅ [大捷] 成功獲取網址。")
                 else:
-                    sb.table("mission_queue").update(update_data).eq("id", task_id).execute()
-                    print(f"🔎 [蓋章] 偵察完成但無網址。")
+                    sb.table("mission_queue").update(upd).eq("id", task_id).execute()
+                    print(f"🔎 [蓋章] 渲染成功但無標籤。")
             else:
-                print(f"⚠️ [連線受阻] 狀態碼: {resp.status_code if resp else 'N/A'}")
+                print(f"⚠️ [受阻] 狀態碼: {resp.status_code if resp else 'N/A'}")
         except Exception as e:
             print(f"💥 異常: {e}")
 
