@@ -1,6 +1,9 @@
 # ---------------------------------------------------------
 # 本程式碼：src/pod_scra_officer.py v7.9 (渲染演習版)
 # 任務：5筆壓力測試、ScrapingAnt 渲染攻堅、Windows 聯軍擬態、自動換裝
+# ---------------------------------------------------------# ---------------------------------------------------------
+# 本程式碼：src/pod_scra_officer.py v8.0 (地毯掃描+履歷蓋章版)
+# 任務：ScrapingAnt 攻堅、<a>標籤解析、不重複浪費、失敗蓋章紀錄
 # ---------------------------------------------------------
 import os, requests, time, re, json, random
 from datetime import datetime, timezone
@@ -9,8 +12,8 @@ from bs4 import BeautifulSoup
 from pod_scra_scanner import fetch_html 
 
 # === 🛠️ 偵察控制面板 ===
-SCAN_LIMIT = 1                 # 🚀 提醒：此變數目前僅作參考，下方硬編碼區塊請也記得改
-FORCE_PROVIDER = "SCRAPINGANT" # 演習目標：啟動真實瀏覽器渲染引擎
+SCAN_LIMIT = 1                 # 🚀 提醒：此變數目前僅供參考
+FORCE_PROVIDER = "SCRAPINGANT" 
 # =========================
 
 def get_secret(key, default=None):
@@ -21,7 +24,7 @@ def get_secret(key, default=None):
     return os.environ.get(key, default)
 
 def run_scra_officer():
-    # 🚀 擬態裝備庫：Windows 聯軍 (針對渲染引擎進行標頭優化)
+    # 🚀 裝備清單：確保金鑰名稱與 YAML/Secrets 100% 對位
     SCRAPER_PERSONAS = [
         {
             "label": "Win11_Chrome_Ant",
@@ -35,12 +38,30 @@ def run_scra_officer():
     ]
     
     sb = create_client(get_secret("SUPABASE_URL"), get_secret("SUPABASE_KEY"))
-    print(f"🚀 [渲染演習] 模式: {FORCE_PROVIDER} | 啟動 JS 強制渲染測試...")
+    print(f"🚀 [地毯攻堅] 模式: {FORCE_PROVIDER} | 目標：突破 50%-70% 頑強份子")
 
-    # === 🚧 戰術硬編碼注意區 (過渡時期手動調整處) ===
-    # 若要真正「只抓一筆」，請將下方 limit(3) 改為 limit(1)，且 limit(2) 改為 limit(0)
-    new_m = sb.table("mission_queue").select("*").eq("scrape_status", "pending").order("created_at", desc=True).limit(3).execute()
-    old_m = sb.table("mission_queue").select("*").eq("scrape_status", "pending").order("created_at", desc=False).limit(2).execute()
+ # === 🚧 戰術硬編碼注意區 (過渡時期手動調整處) ===
+    # 這裡採用「括號換行法」，讓數字 (limit) 靠左對齊，方便修改
+    
+    # 🚀 任務 A：領取最新掛載的任務
+    new_m = (
+        sb.table("mission_queue")
+        .select("*")
+        .eq("scrape_status", "pending")
+        .order("created_at", desc=True)
+        .limit(1)    # 👈 [修改此數字] 控制新任務筆數
+        .execute()
+    )
+
+    # 🚀 任務 B：領取積壓已久的舊任務
+    old_m = (
+        sb.table("mission_queue")
+        .select("*")
+        .eq("scrape_status", "pending")
+        .order("created_at", desc=False)
+        .limit(0)    # 👈 [修改此數字] 控制舊任務筆數
+        .execute()
+    )
     # =============================================
     
     all_missions = new_m.data + old_m.data
@@ -50,71 +71,73 @@ def run_scra_officer():
         task_id = mission['id']
         podbay_slug = str(mission.get('podbay_slug') or "").strip()
         current_count = (mission.get('scrape_count') or 0) + 1
+        history = str(mission.get('recon_persona') or "") # 讀取蓋章紀錄
         now_iso = datetime.now(timezone.utc).isoformat()
         
         recon_success = False
         final_resp = None
-        active_persona_label = "N/A"
+        active_persona = None
 
         for persona in SCRAPER_PERSONAS:
-            if not persona["key"]: 
-                print(f"⚠️ 找不到 {FORCE_PROVIDER} 的金鑰，請檢查 YAML env 與 Secrets 設定！")
+            if not persona["key"]: continue
+            
+            # 🛡️ 避震：如果歷史記錄中已有此偵察兵，則跳過避免浪費點數
+            if persona["label"] in history:
+                print(f"⏭️ [跳過] {persona['label']} 曾偵察過 {podbay_slug}，換人試試...")
                 continue
             
-            active_persona_label = persona["label"]
-            print(f"📡 [偵察 {idx+1}/{total_count}] 使用裝備: {active_persona_label} 對位 {podbay_slug}...")
+            active_persona = persona
+            print(f"📡 [偵察 {idx+1}/{total_count}] 使用裝備: {active_persona['label']} 攻堅 {podbay_slug}...")
             
-            # 🚀 自動對位金鑰：確保 Ant 金鑰能正確傳遞給渲染引擎
-            current_all_keys = {FORCE_PROVIDER: [persona["key"]]}
+            current_all_keys = {FORCE_PROVIDER: [active_persona["key"]]}
             
             try:
                 resp = fetch_html(FORCE_PROVIDER, f"https://podbay.fm/p/{podbay_slug}", current_all_keys)
                 final_resp = resp
-
                 if resp and resp.status_code == 200:
-                    recon_success = True
-                    break 
+                    recon_success = True; break 
                 elif resp and resp.status_code in [403, 429]:
-                    wait_sec = random.randint(300, 600)
-                    print(f"🛑 [點數枯竭] 休眠 {wait_sec//60} 分鐘避震...")
-                    time.sleep(wait_sec)
-                    continue 
-                else:
-                    break 
+                    time.sleep(random.randint(60, 180)); continue 
+                else: break 
             except Exception as e:
-                print(f"💥 裝備異常: {e}")
-                break
+                print(f"💥 異常: {e}"); break
 
-        # --- 數據歸檔 (寫入 recon_persona 欄位) ---
+        # --- 🚀 解析器升級：地毯搜索法 ---
+        final_url = None
         if recon_success:
             soup = BeautifulSoup(final_resp.text, 'html.parser')
-            audio_meta = soup.find('meta', property=re.compile(r'(og:audio|twitter:player:stream)'))
-            final_url = audio_meta.get('content') if audio_meta else None
+            # A. 傳統 Meta
+            meta = soup.find('meta', property=re.compile(r'(og:audio|twitter:player:stream)'))
+            final_url = meta.get('content') if meta else None
             
-            status = "success" if final_url else "manual_check"
-            sb.table("mission_queue").update({
-                "audio_url": final_url, 
-                "scrape_status": status, 
-                "used_provider": f"{FORCE_PROVIDER}_{active_persona_label}",
-                "recon_persona": active_persona_label, 
-                "last_scraped_at": now_iso, 
-                "scrape_count": current_count
-            }).eq("id", task_id).execute()
-            print(f"{'✅' if final_url else '🔎'} [完成] {podbay_slug}")
-        else:
-            status_code = final_resp.status_code if final_resp else 'N/A'
-            sb.table("mission_queue").update({
-                "last_scraped_at": now_iso, "scrape_count": current_count,
-                "used_provider": f"{FORCE_PROVIDER}_ALL_FAIL_{status_code}",
-                "recon_persona": "ALL_FAILED"
-            }).eq("id", task_id).execute()
-            print(f"⚠️ [任務受阻] 狀態碼: {status_code}")
+            # B. [新增] <a> 標籤地毯搜索 (您的偵察發現)
+            if not final_url:
+                for a_tag in soup.find_all('a', href=True):
+                    txt = a_tag.get_text().upper()
+                    hrf = a_tag['href'].lower()
+                    if ('DOWNLOAD' in txt or 'MP3' in txt) and ('.mp3' in hrf or '.m4a' in hrf or 'mediaselector' in hrf):
+                        final_url = a_tag['href']; break
 
-        # --- [序列化戰術間歇] ---
+        # --- 數據歸檔 (更新履歷章) ---
+        new_stamp = active_persona['label'] if active_persona else "FAILED_RECON"
+        updated_history = history + (" | " if history else "") + new_stamp
+
+        if recon_success and final_url:
+            sb.table("mission_queue").update({
+                "audio_url": final_url, "scrape_status": "success", 
+                "used_provider": f"{FORCE_PROVIDER}_{new_stamp}",
+                "recon_persona": updated_history, "last_scraped_at": now_iso, "scrape_count": current_count
+            }).eq("id", task_id).execute()
+            print(f"✅ [成功] {podbay_slug}")
+        else:
+            # 偵察失敗也蓋章紀錄，並保持待命狀態
+            sb.table("mission_queue").update({
+                "recon_persona": updated_history, "last_scraped_at": now_iso, "scrape_count": current_count
+            }).eq("id", task_id).execute()
+            print(f"🔎 [未獲取網址] {podbay_slug} 已蓋章紀錄歷史")
+
         if idx < total_count - 1:
-            task_gap = random.randint(60, 180) 
-            print(f"⏳ [節奏控制] 任務間隔休息 {task_gap} 秒...")
-            time.sleep(task_gap)
+            time.sleep(random.randint(30, 60))
 
 if __name__ == "__main__":
     run_scra_officer()
