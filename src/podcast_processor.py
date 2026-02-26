@@ -110,18 +110,17 @@ class PodcastProcessor:
         # 鎖定狀態為 processing
         self.supabase.table("mission_queue").update({"scrape_status": "processing"}).eq("id", mission["id"]).execute()
         return mission
-#------以上更新定位線------------ 
 
-    def finalize_cloud_mission(self, mission_id, status="completed"):
+    def finalize_cloud_mission(self, mission_id, status="success"):
         """
-        更新任務最終執行狀態 (完成或戰損)
+        🚀 [大一統修正] 統一更新 mission_queue 的任務狀態
         """
-        self.supabase.table("global_missions") \
-            .update({"status": status}) \
-            .eq("id", mission_id) \
-            .execute()
-        print(f"🏁 [結案] 任務 ID {mission_id} 狀態更新為: {status}")
-        
+        self.supabase.table("mission_queue").update({
+            "scrape_status": status,               # 👈 這裡應使用變數 status，而非固定的 "processing"
+            "recon_persona": "Troop1_Regular_IP"    # 留下部隊一的章，OK
+        }).eq("id", mission_id).execute()
+        print(f"🏁 [結案] 任務 ID {mission_id} 標記為: {status}")
+#------以上更新定位線------------ 
 
     def _get_selected_proxy(self) -> str:
         """[軍需調度] 委託 ProxyMedic 提供今日隊員 [cite: 2026-02-02]"""
@@ -146,11 +145,15 @@ class PodcastProcessor:
         if not squad_config: 
             print("❌ [錯誤] 無法領取今日裝備，行動中止。")
             return
-
+#-----------------以下修正定位線-------------
         # 4. 戰術診斷提示
-        if diagnostic_mode and squad_config.get('is_warmup'):
-            print("💡 診斷模式：今日為溫養日，將驗證基礎擬態路徑。")
-
+        if squad_config.get("is_warmup"):
+            print("💤 [溫養日] 啟動數位人格全域巡邏...")
+            # 🚀 修正：改從 mission_queue 讀取待命任務，並過濾 scrape_status
+            all_pending = self.supabase.table("mission_queue").select("source_name, audio_url") \
+                            .eq("scrape_status", "pending").execute().data
+#-----------------以上修正定位線-------------
+     
         # 5. ⚖️ 代理策略與導航員初始化
         proxy_url = squad_config.get('transport_proxy', "GitHub_Runner_Direct")
         
