@@ -1,6 +1,6 @@
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_officer.py v8.8 (全域採集最終版)
-# 任務：1. RSS 優先秒殺 2. Manual Test 特殊處理 3. HTML 關鍵字獵殺 4. 戰利品自動歸庫
+# 本程式碼：src/pod_scra_officer.py v8.8.1 (配額回歸版)
+# 任務：1. 恢復 1新+1舊 配額 2. RSS 優先秒殺 3. 戰利品自動歸庫
 # ---------------------------------------------------------
 import os, requests, time, re, json, random, feedparser
 from datetime import datetime, timezone
@@ -8,14 +8,10 @@ from supabase import create_client, Client
 from bs4 import BeautifulSoup
 from pod_scra_scanner import fetch_html 
 
-# === 🛠️ 偵察控制面板 ===
-ACTIVE_STRATEGY = 5  # 👈 指揮官可隨時切換 [1=Premium, 5=Ant]
+ACTIVE_STRATEGY = 5  # 👈 [5=ScrapingAnt]
 
 STRATEGY_MAP = {
     1: {"provider": "SCRAPERAPI", "label": "Win11_Chrome_Premium", "key_name": "SCRAP_API_KEY_V2"},
-    2: {"provider": "WEBSCRAPING", "label": "WebScraping_AI_JS", "key_name": "WEBSCRAP_API_KEY"},
-    3: {"provider": "SCRAPEDO", "label": "ScrapeDo_Render_Ops", "key_name": "SCRAPEDO_API_KEY"},
-    4: {"provider": "HASDATA", "label": "HasData_Residential", "key_name": "HASDATA_API_KEY"},
     5: {"provider": "SCRAPINGANT", "label": "Win11_Chrome_Ant", "key_name": "SCRAPINGANT_API_KEY"}
 }
 
@@ -32,102 +28,76 @@ def run_scra_officer():
     sb = create_client(get_secret("SUPABASE_URL"), get_secret("SUPABASE_KEY"))
     now_iso = datetime.now(timezone.utc).isoformat()
     
-    print(f"🚀 [解碼官出擊] 兵種: {persona_label} | 目標: 領取已過期之緩衝任務")
+    print(f"🚀 [自適性啟動] 策略: {ACTIVE_STRATEGY} | 兵種: {persona_label}")
 
-    # 🚧 聯表查詢任務 (帶入主表 RSS 資訊，對位 rss_feed_url 欄位)
-    mission_res = (sb.table("mission_queue").select("*, mission_program_master(*)")
-                 .eq("scrape_status", "pending")
-                 .lte("troop2_start_at", now_iso)
-                 .order("created_at", desc=True).limit(2).execute())
+    # === 🚧 戰術配額區 (恢復指揮官 1+1 模式) ===
+    # 領取最新 1 筆
+    new_m = (sb.table("mission_queue").select("*, mission_program_master(*)")
+             .eq("scrape_status", "pending").lte("troop2_start_at", now_iso)
+             .order("created_at", desc=True)\
+             .limit(1).execute())        #新任務上限
+
+    # 領取最舊 1 筆
+    old_m = (sb.table("mission_queue").select("*, mission_program_master(*)")
+             .eq("scrape_status", "pending").lte("troop2_start_at", now_iso)
+             .order("created_at", desc=False)\
+             .limit(1).execute())         #舊任務上限
     
-    if not mission_res.data:
+    all_missions = new_m.data + old_m.data
+    # ========================================================
+
+    if not all_missions:
         print("☕ [待命] 戰場目前無符合條件之任務。")
         return
 
-    for m in mission_res.data:
+    for m in all_missions:
         task_id, slug = m['id'], str(m.get('podbay_slug') or "").strip()
         title, history = m.get('episode_title', ""), str(m.get('recon_persona') or "")
         master = m.get('mission_program_master')
         
-        # 🛡️ 履歷章制度：跳過失敗過的兵種
         if persona_label in history: continue
         print(f"📡 [偵察] 攻堅 {slug} | 目標: {title[:30]}...")
 
         # --- ⚡ 階段一：情報優勢 (RSS 優先協議) ---
         if master and master.get('rss_feed_url'):
-            print(f"🔑 [情報優勢] 發現 RSS 連結，嘗試直接解鎖...")
             try:
                 feed = feedparser.parse(master['rss_feed_url'])
-                target_entry = None
-                
-                # 🧪 處理 Manual Test 標題（人造靶標特殊邏輯）
-                if "Manual Test" in title:
-                    target_entry = feed.entries[0] if feed.entries else None
-                    print(f"🧪 [實驗室] 偵測到模擬任務，自動導向 RSS 最新集數。")
-                else:
-                    # 正常匹配標題
-                    target_entry = next((e for e in feed.entries if e.title == title), None)
-
-                if target_entry:
-                    f_audio = next((enc.href for enc in target_entry.enclosures if enc.type.startswith("audio")), None)
+                target = next((e for e in feed.entries if e.title == title), None) if "Manual Test" not in title else feed.entries[0]
+                if target:
+                    f_audio = next((enc.href for enc in target.enclosures if enc.type.startswith("audio")), None)
                     if f_audio:
-                        upd_data = {
-                            "audio_url": f_audio, 
-                            "episode_title": target_entry.title, # 覆蓋人造標題為真實標題
-                            "scrape_status": "success", 
-                            "used_provider": "RSS_STRIKE",
-                            "last_scraped_at": now_iso
-                        }
-                        sb.table("mission_queue").update(upd_data).eq("id", task_id).execute()
-                        print(f"✅ [秒殺] RSS 協議直接捕獲成功！")
-                        continue # 直接進入下一個任務
-            except Exception as rss_err:
-                print(f"⚠️ RSS 協議解析中斷: {rss_err}")
+                        sb.table("mission_queue").update({"audio_url": f_audio, "episode_title": target.title, "scrape_status": "success", "used_provider": "RSS_STRIKE"}).eq("id", task_id).execute()
+                        print(f"✅ [秒殺] RSS 捕獲成功！"); continue
+            except: print("⚠️ RSS 解析微崩，準備轉 HTML 攻堅")
 
-        # --- 🛡️ 階段二：HTML 攻堅與戰利品收集 (漁翁得利模式) ---
+        # --- 🛡️ 階段二：HTML 攻堅與戰利品收集 ---
         try:
             resp = fetch_html(provider, f"https://podbay.fm/p/{slug}", {provider: api_key})
             if resp and resp.status_code == 200:
                 soup = BeautifulSoup(resp.text, 'html.parser')
                 f_audio, f_rss = None, None
-                
-                # 🛠️ [戰利品關鍵字]：尋找 RSS Pass
-                rss_keywords = ['RSS', 'FEED', 'XML', 'SUBSCRIBE', 'PODCAST FEED']
+                rss_keywords = ['RSS', 'FEED', 'XML', 'SUBSCRIBE']
                 
                 for a in soup.find_all('a', href=True):
                     hrf, txt = a['href'].lower(), a.get_text().upper()
-                    
-                    # 1. 尋找音檔下載點
-                    if not f_audio and ('DOWNLOAD' in txt or 'MP3' in txt) and any(k in hrf for k in ['podtrac', 'megaphone', 'pdst', 'pscrb', 'akamaized']):
+                    if not f_audio and ('DOWNLOAD' in txt or 'MP3' in txt) and any(k in hrf for k in ['podtrac', 'megaphone', 'pdst', 'pscrb']):
                         f_audio = a['href']
-                    
-                    # 2. 🚀 [順手牽羊] 尋找 RSS 戰利品 (回填主表)
                     if any(key in txt or key in hrf.upper() for key in rss_keywords):
-                        if 'podbay.fm' not in hrf and hrf.startswith('http'): # 排除站內連結
-                            f_rss = a['href']
+                        if 'podbay.fm' not in hrf and hrf.startswith('http'): f_rss = a['href']
                 
-                # 嘗試從 meta link 抓取標準 RSS
                 rtag = soup.find('link', type='application/rss+xml', href=True)
                 if rtag: f_rss = rtag['href']
 
-                # 🚀 [戰利品歸庫]：若發現新 RSS 且主表原本為空，自動更新主表
+                # 🚀 戰利品回填主表
                 if f_rss and (not master or not master.get('rss_feed_url')):
                     sb.table("mission_program_master").update({"rss_feed_url": f_rss}).eq("podbay_slug", slug).execute()
-                    print(f"💎 [戰利品] 發現隱藏 RSS，已自動歸庫主表：{f_rss}")
+                    print(f"💎 [戰利品] 發現隱藏 RSS：{f_rss}")
 
-                # 結案回填任務表
-                updated_history = history + (" | " if history else "") + persona_label
-                upd = {"recon_persona": updated_history, "last_scraped_at": now_iso, "scrape_count": (m.get('scrape_count') or 0) + 1}
-                
-                if f_audio:
-                    upd.update({"audio_url": f_audio, "scrape_status": "success", "used_provider": f"{provider}_FISHER"})
-                    print(f"✅ [成功] HTML 掃描攻堅完成。")
-                else:
-                    print(f"🔎 [蓋章] 無標籤章。")
-                
+                # 結案
+                upd = {"recon_persona": history + (" | " if history else "") + persona_label, "last_scraped_at": now_iso, "scrape_count": (m.get('scrape_count') or 0) + 1}
+                if f_audio: upd.update({"audio_url": f_audio, "scrape_status": "success", "used_provider": f"{provider}_FISHER"})
                 sb.table("mission_queue").update(upd).eq("id", task_id).execute()
-        except Exception as e:
-            print(f"💥 攻堅異常: {e}")
+        except Exception as e: print(f"💥 異常: {e}")
 
 if __name__ == "__main__":
     run_scra_officer()
