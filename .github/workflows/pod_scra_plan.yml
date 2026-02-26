@@ -1,6 +1,5 @@
 ##########################################################################
-# 🏃 S-Plan 4.0 全鏈條接力 - 戰略資源自動重設版
-# scraper & zenrows 固定每月1日喚醒進行恢復點數，其餘周一~五 03:00 執行任務
+# 🏃 S-Plan 4.1 全鏈條接力 - 中央指揮與異地動員版
 ##########################################################################
 name: 🏃 S-Plan podcast
 
@@ -8,7 +7,6 @@ on:
   schedule:
     - cron: '0 19 * * 1-5' # 週一至週五 03:00 (台北時間)
     - cron: '0 19 1 * *'    # 每月 1 日凌晨 03:00 喚醒
-
   workflow_dispatch:
     inputs:
       force_mode:
@@ -20,49 +18,44 @@ on:
           - AUTO
           - MODE_1_Scrapi
           - MODE_2_Zenrows
-          - MODE_3_Hasdata # 原本的 Webscrap 改為 Hasdata。
+          - MODE_3_Hasdata
           - MODE_4_Scrapedo
+
 jobs:
   relay_mission:
     runs-on: ubuntu-latest
     timeout-minutes: 180 
 
-    # 🚀 集中定義 Job 級別 env (下方所有 steps 都會自動繼承)
     env:
-
+      # --- 核心連線 ---
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }} # 🚀 修正：對位法定清單
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }} # 🚀 補齊：倉庫路徑    
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }} # 🚀 確保有這一行
         
+      # --- AI 引擎 ---
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
 
+      # --- 通訊與動員 ---
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      
-      SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
-      ZENROWS_API_KEY: ${{ secrets.ZENROWS_API_KEY }}
-      WEBSCRAP_API_KEY: ${{ secrets.WEBSCRAP_API_KEY }} # 🚀 修正：對位法定清單
-      SCRAPEDO_API_KEY: ${{ secrets.SCRAPEDO_API_KEY }} # 🚀 修正：對位法定清單
-      HASDATA_API_KEY: ${{ secrets.HASDATA_API_KEY }}
-      # --- 在 pod_scra_plan.yml 的 env: 區塊末端加入 ---
-
-# --- 在 pod_scra_plan.yml 的 env: 區塊末端加入 ---
-
-      # 🚀 指導官補發：ScrapingAnt 渲染引擎金鑰
-      SCRAPINGANT_API_KEY: ${{ secrets.SCRAPINGANT_API_KEY }}
-      # 🚀 指導官補發：ScraperAPI 第二把金鑰 (5000點)
-      SCRAP_API_KEY_V2: ${{ secrets.SCRAP_API_KEY_V2 }}
-
-# 🚀 補齊：接力通訊組件 (若無此二項，Render 無法被喚醒)
       RENDER_WEBHOOK_URL: ${{ secrets.RENDER_WEBHOOK_URL }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      
+      # --- 偵察金鑰 ---
+      SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
+      ZENROWS_API_KEY: ${{ secrets.ZENROWS_API_KEY }}
+      WEBSCRAP_API_KEY: ${{ secrets.WEBSCRAP_API_KEY }}
+      SCRAPEDO_API_KEY: ${{ secrets.SCRAPEDO_API_KEY }}
+      HASDATA_API_KEY: ${{ secrets.HASDATA_API_KEY }}
+      SCRAPINGANT_API_KEY: ${{ secrets.SCRAPINGANT_API_KEY }}
+      SCRAP_API_KEY_V2: ${{ secrets.SCRAP_API_KEY_V2 }}
+      
       PYTHONUNBUFFERED: 1
-
-# ... (前面 env 部分相同，保留所有 Secret) ...
 
     steps:
     - name: 📦 檢出程式碼
@@ -75,25 +68,37 @@ jobs:
         cache: 'pip'
 
     - name: ⚙️ 安裝必要依賴與 FFmpeg
-      # 🚀 提醒：FFmpeg 必須留下，供 v3.1 版 Transport 進行 AI 前置壓縮
       run: |
         sudo apt-get update && sudo apt-get install -y ffmpeg
         python -m pip install --upgrade pip
         pip install requests beautifulsoup4 supabase python-dotenv boto3 google-generativeai groq feedparser
-    - name: 🎯 執行偵察任務 (Officer)
+
+    - name: 🎯 [Step 1] 執行偵察 (Officer)
       env:
         STRATEGY_MODE: ${{ github.event.inputs.force_mode || 'AUTO' }}
       run: |
-        echo "📡 [啟動] 解碼官出擊，目前 Officer v7.2 將強制使用 HASDATA 住宅代理模式"
+        echo "📡 [啟動] 偵察官出擊..."
         python src/pod_scra_officer.py
 
-    - name: 🕒 戰術緩衝 (讓雲端運輸兵有時間接單)
-      # 🚀 說明：雖然解耦了，但留 60 秒讓 Supabase 狀態更新同步也是好事
-      run: sleep 60 
+    - name: 🚛 [Step 2] 執行搬運 (Worker v8.1)
+      # 🚀 說明：這行確保 GHA 執勤時會真正進行下載上傳
+      run: |
+        echo "🚛 [啟動] 重裝運輸機進入戰場..."
+        python src/pod_scra_worker.py
 
-    - name: 📝 執行情報提煉與報戰 (Transport/Reporter)
-      # 🚀 任務：從 R2 下載 Worker 搬好的檔案 -> 壓縮 -> AI 摘要 -> Telegram
+    - name: 📡 [Step 3] 遠程動員 (喚醒 Render/Zeabur/HF)
+      # 🚀 說明：不論誰執勤，都戳一下 Render，確保它的 Webhook 邏輯被觸發
+      if: always()
+      run: |
+        echo "🔗 正在向遠程節點發送動員指令..."
+        curl -X POST "${{ secrets.RENDER_WEBHOOK_URL }}" \
+             -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
+             -H "Content-Type: application/json" \
+             -d '{"secret": "${{ secrets.CRON_SECRET }}"}' || echo "⚠️ 遠程節點暫時無回應"
+
+    - name: 📝 [Step 4] 情報提煉 (Transport)
+      # 🚀 說明：負責把 R2 檔案變戰報，發到 Telegram
       run: python src/pod_scra_transport.py
 
-    - name: 🧹 執行倉庫大掃除 (Cleaner)
+    - name: 🧹 [Step 5] 倉庫大掃除 (Cleaner)
       run: python src/pod_scra_cleaner.py
