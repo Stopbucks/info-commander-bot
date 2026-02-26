@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from pod_scra_scanner import fetch_html 
 
 # === 🛠️ 偵察控制面板 ===
-ACTIVE_STRATEGY = 1  # 👈 [1=Premium, 5=Ant]
+ACTIVE_STRATEGY = 5  # 👈 [1=Premium, 5=Ant]
 
 STRATEGY_MAP = {
     1: {"provider": "SCRAPERAPI", "label": "Win11_Chrome_Premium", "key_name": "SCRAP_API_KEY_V2"},
