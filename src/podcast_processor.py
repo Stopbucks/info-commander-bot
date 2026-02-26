@@ -84,35 +84,33 @@ class PodcastProcessor:
     # ---------------------------------------------------------
     # 新增：雲端任務領取與鎖定邏輯
     # ---------------------------------------------------------
+ 
+#------以下更新定位線------------ 
     def fetch_cloud_mission(self):
         """
-        從 Supabase 領取一則待處理任務 (pending)
+        🚀 [大一統] 部隊一專屬：領取『現在時間 < troop2_start_at』且尚未完成的任務
         """
-        print("📡 [領命] 正在向雲端彈藥庫請求任務...")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        print("📡 [領命] 正在偵察部隊一緩衝區任務...")
         
-        # 1. 領取一筆最舊的 pending 任務 (先進先出)
-        # 💡 這裡假設您已在程式中初始化 self.supabase_client
-        response = self.supabase.table("global_missions") \
+        # 邏輯：pending 狀態 且 現在時間 < troop2_start_at (代表未達部隊二開火線)
+        # 如果該任務沒有 troop2_start_at (例如舊任務)，則優先領取
+        response = self.supabase.table("mission_queue") \
             .select("*") \
-            .eq("status", "pending") \
+            .eq("scrape_status", "pending") \
+            .or_(f"troop2_start_at.gt.{now_iso},troop2_start_at.is.null") \
             .order("created_at", desc=False) \
-            .limit(1) \
-            .execute()
+            .limit(1).execute()
 
         if not response.data:
-            print("☕ [待命] 雲端目前無待處理任務。")
+            print("☕ [待命] 目前無部隊一可攔截之任務。")
             return None
         
         mission = response.data[0]
-        
-        # 2. 🚀 原子化鎖定：立即標記為處理中，防止游擊隊搶食
-        self.supabase.table("global_missions") \
-            .update({"status": "processing"}) \
-            .eq("id", mission["id"]) \
-            .execute()
-            
-        print(f"🎯 [受命] 成功領取任務：{mission['source_name']} - {mission['audio_url'][:40]}...")
+        # 鎖定狀態為 processing
+        self.supabase.table("mission_queue").update({"scrape_status": "processing"}).eq("id", mission["id"]).execute()
         return mission
+#------以上更新定位線------------ 
 
     def finalize_cloud_mission(self, mission_id, status="completed"):
         """
