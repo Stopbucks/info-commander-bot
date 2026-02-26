@@ -79,8 +79,7 @@ jobs:
       run: |
         sudo apt-get update && sudo apt-get install -y ffmpeg
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 supabase python-dotenv boto3 google-generativeai groq
-
+        pip install requests beautifulsoup4 supabase python-dotenv boto3 google-generativeai groq feedparser
     - name: 🎯 執行偵察任務 (Officer)
       env:
         STRATEGY_MODE: ${{ github.event.inputs.force_mode || 'AUTO' }}
