@@ -35,13 +35,13 @@ def run_scra_officer():
     new_m = (sb.table("mission_queue").select("*, mission_program_master(*)")
              .eq("scrape_status", "pending").lte("troop2_start_at", now_iso)
              .order("created_at", desc=True)\
-             .limit(1).execute())        #新任務上限
+             .limit(2).execute())        # 新任務上限
 
     # 領取最舊 1 筆
     old_m = (sb.table("mission_queue").select("*, mission_program_master(*)")
              .eq("scrape_status", "pending").lte("troop2_start_at", now_iso)
              .order("created_at", desc=False)\
-             .limit(1).execute())         #舊任務上限
+             .limit(1).execute())         # 舊任務上限
     
     all_missions = new_m.data + old_m.data
     # ========================================================
