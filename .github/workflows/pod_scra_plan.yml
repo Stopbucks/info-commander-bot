@@ -34,7 +34,7 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-      R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }} # 🚀 確保有這一行
+      R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }} # 🚀 新增github密碼變數
         
       # --- AI 引擎 ---
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
