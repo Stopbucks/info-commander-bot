@@ -30,18 +30,19 @@ def run_scra_officer():
     
     print(f"🚀 [解碼官] 兵種: {persona_label} | 配額: 2新 + 1舊")
 
-    # === 🚧 戰術配額區 (2新 + 1舊) ===
-    new_m = (sb.table("mission_queue").select("*, mission_program_master(*)")
-             .eq("scrape_status", "pending").lte("troop2_start_at", now_iso)
-             .order("created_at", desc=True)\
-             .limit(2).execute())           # 新任務輸入
+    # === 🚧 Officer 戰術配額區 (2新 + 1舊：防崩潰) ===
+    # 1. 抓取 2 筆最新的待偵察任務
+    new_m = sb.table("mission_queue").select("*, mission_program_master(*)") \
+            .eq("scrape_status", "pending").lte("troop2_start_at", now_iso) \
+            .order("created_at", desc=True).limit(2).execute()
 
-    old_m = (sb.table("mission_queue").select("*, mission_program_master(*)")
-             .eq("scrape_status", "pending").lte("troop2_start_at", now_iso)
-             .order("created_at", desc=False)\
-             .limit(1).execute())           # 舊任務輸入
-    
-    all_missions = new_m.data + old_m.data
+    # 2. 抓取 1 筆最舊的待偵察任務
+    old_m = sb.table("mission_queue").select("*, mission_program_master(*)") \
+            .eq("scrape_status", "pending").lte("troop2_start_at", now_iso) \
+            .order("created_at", desc=False).limit(1).execute()
+
+    # 3. 安全合併任務清單 (加上 or [] 防止 None 報錯)
+    all_missions = (new_m.data or []) + (old_m.data or [])
 
     if not all_missions:
         print("☕ [待命] 戰場目前無符合條件之任務。")
