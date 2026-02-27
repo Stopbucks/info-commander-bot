@@ -91,10 +91,12 @@ jobs:
       if: always()
       run: |
         echo "🔗 正在向遠程節點發送動員指令..."
+        # 🚀 建議微調：加入 -v (顯示細節) 與 --fail (失敗時報錯)
         curl -X POST "${{ secrets.RENDER_WEBHOOK_URL }}" \
              -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
              -H "Content-Type: application/json" \
-             -d '{"secret": "${{ secrets.CRON_SECRET }}"}' || echo "⚠️ 遠程節點暫時無回應"
+             -d '{"secret": "${{ secrets.CRON_SECRET }}"}' \
+             --fail || echo "⚠️ 遠程節點拒絕訪問或無回應"
 
     - name: 📝 [Step 4] 情報提煉 (Transport)
       # 🚀 說明：負責把 R2 檔案變戰報，發到 Telegram
