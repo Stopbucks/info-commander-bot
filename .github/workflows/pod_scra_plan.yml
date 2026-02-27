@@ -71,7 +71,8 @@ jobs:
       run: |
         sudo apt-get update && sudo apt-get install -y ffmpeg
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 supabase python-dotenv boto3 google-generativeai groq feedparser
+        # 🚀 這裡必須補上 flask 與 apscheduler
+        pip install requests beautifulsoup4 supabase python-dotenv boto3 google-generativeai groq feedparser flask apscheduler
 
     - name: 🎯 [Step 1] 執行偵察 (Officer)
       env:
