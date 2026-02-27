@@ -80,23 +80,20 @@ jobs:
         echo "📡 [啟動] 偵察官出擊..."
         python src/pod_scra_officer.py
 
-    - name: 🚛 [Step 2] 執行搬運 (Worker v8.1)
-      # 🚀 說明：這行確保 GHA 執勤時會真正進行下載上傳
+    - name: 🚛 [Step 2] 執行搬運 (Fortress Core)
       run: |
-        echo "🚛 [啟動] 重裝運輸機進入戰場..."
-        python src/pod_scra_worker.py
+        echo "🚛 [啟動] 要塞核心運輸模組 (GHA Node)..."
+        # 🚀 關鍵：呼叫 app.py 裡的集成任務
+        python -c "from app import run_integrated_mission; run_integrated_mission()"
 
-    - name: 📡 [Step 3] 遠程動員 (喚醒 Render/Zeabur/HF)
-      # 🚀 說明：不論誰執勤，都戳一下 Render，確保它的 Webhook 邏輯被觸發
+    - name: 📡 [Step 3] 遠程動員 (喚醒 Render 執勤官)
       if: always()
       run: |
         echo "🔗 正在向遠程節點發送動員指令..."
-        # 🚀 建議微調：加入 -v (顯示細節) 與 --fail (失敗時報錯)
-        curl -X POST "${{ secrets.RENDER_WEBHOOK_URL }}" \
+        # 🚀 這裡維持喚醒 Render，確保免費層不會休眠
+        curl -X POST "${{ secrets.RENDER_WEBHOOK_URL }}/ping" \
              -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
-             -H "Content-Type: application/json" \
-             -d '{"secret": "${{ secrets.CRON_SECRET }}"}' \
-             --fail || echo "⚠️ 遠程節點拒絕訪問或無回應"
+             --fail || echo "⚠️ 遠程節點無回應，由 GHA 本地處理"
 
     - name: 📝 [Step 4] 情報提煉 (Transport)
       # 🚀 說明：負責把 R2 檔案變戰報，發到 Telegram
