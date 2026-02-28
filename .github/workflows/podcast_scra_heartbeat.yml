@@ -1,27 +1,27 @@
 ##########################################################################
 # 🏹 此程式檔：podcast_scra_heartbeat.yml
 ##########################################################################
-# 1. 任務目標：負責叫醒vercel 進行巡邏
-# 2. 觸發機制：00:00, 06:00, 12:00, 18:00 (對應 TW 08:00, 14:00, 20:00, 02:00)
+# 1. 任務目標：負責叫醒 Vercel 進行每日總巡邏 (破曉點火)
+# 2. 觸發機制：UTC 00:00 (對應台灣時間早上 08:00 執行一次)
+# 3. 安全層級：最高 (網址與金鑰皆封裝於 Secrets)
 ##########################################################################
 
 name: S-Plan External Trigger
 
 on:
   schedule:
-    # 🚀 UTC 00:00, 06:00, 12:00, 18:00 (對應 TW 08:00, 14:00, 20:00, 02:00)
-    - cron: '0 0,6,12,18 * * *'
-  workflow_dispatch: # 允許指揮官手動測試
+    # 🚀 每日觸發 1 次：UTC 00:00 (台灣 08:00)
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 允許指揮官隨時手動發射測試
 
 jobs:
   ping_scout:
     runs-on: ubuntu-latest
     steps:
-      - name: 📡 發動遠程喚醒指令
+      - name: 📡 發動遠程隱形喚醒指令
         run: |
-          # 發送帶有 X-API-KEY 標頭的請求，確保通過 Vercel 軟體防火牆。
-          curl -s -o /dev/null -w "Status: %{http_code}" \
-            -H "X-API-KEY: ${{ secrets.VERCEL_AUTH_TOKEN }}" \
-            "${{ secrets.VERCEL_SCOUT_URL }}"
-
- 
+          echo "啟動破曉點火程序..."
+          # 🚀 組合機密座標與通行密碼，發送 GET 請求並只印出 HTTP 狀態碼
+          curl -s -o /dev/null -w "Status: %{http_code}\n" \
+            "${{ secrets.VERCEL_SCOUT_URL }}?token=${{ secrets.CRON_SECRET }}"
+          echo "喚醒指令發送完畢。"
