@@ -126,8 +126,11 @@ def run_integrated_mission():
                                 hrf, txt = a['href'].lower(), a.get_text().upper()
                                 if not f_audio and ('DOWNLOAD' in txt or 'MP3' in txt) and any(k in hrf for k in ['podtrac', 'megaphone', 'pdst', 'pscrb']):
                                     f_audio = a['href']
-                                if not master.get('rss_feed_url') and any(k in txt for k in ['RSS', 'FEED']) and 'podbay.fm' not in hrf:
+                                # 🚀 修正版：增加 master 的存在判定
+                                if master and not master.get('rss_feed_url') and any(k in txt for k in ['RSS', 'FEED']) and 'podbay.fm' not in hrf:
                                     sb.table("mission_program_master").update({"rss_feed_url": a['href']}).eq("podbay_slug", slug).execute()
+                                
+                    
                     except: pass
 
             # --- 第二階段：運輸 (下載與回填) ---
