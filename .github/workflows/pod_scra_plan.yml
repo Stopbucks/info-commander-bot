@@ -1,16 +1,16 @@
 ##########################################################################
-# 🏃 S-Plan 4.1 全鏈條接力 - 中央指揮與異地動員版
+# 🏃 S-Plan 5.0 全鏈條接力 - 混編艦隊全能偵察版
 ##########################################################################
-name: 🏃 S-Plan podcast
+name: 🏃 S-Plan Universal Fleet
 
 on:
   schedule:
-    - cron: '0 19 * * 1-5' # 週一至週五 03:00 (台北時間)
-    - cron: '0 19 1 * *'    # 每月 1 日凌晨 03:00 喚醒
+    # 🚀 每 4 小時巡邏一次，避開整點與 18 分 (對應 UTC 00:35, 04:35, 08:35...)
+    - cron: '35 0,4,8,12,16,20 * * *'
   workflow_dispatch:
     inputs:
       force_mode:
-        description: '🚀 選擇作戰模式'
+        description: '🚀 選擇作戰模式 (Officer 使用)'
         required: true
         default: 'AUTO'
         type: choice
@@ -22,7 +22,7 @@ on:
           - MODE_4_Scrapedo
 
 jobs:
-  relay_mission:
+  fleet_operations:
     runs-on: ubuntu-latest
     timeout-minutes: 180 
 
@@ -34,7 +34,7 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-      R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }} # 🚀 新增github密碼變數
+      R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
         
       # --- AI 引擎 ---
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -43,8 +43,6 @@ jobs:
       # --- 通訊與動員 ---
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      RENDER_WEBHOOK_URL: ${{ secrets.RENDER_WEBHOOK_URL }}
-      CRON_SECRET: ${{ secrets.CRON_SECRET }}
       
       # --- 偵察金鑰 ---
       SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
@@ -55,6 +53,7 @@ jobs:
       SCRAPINGANT_API_KEY: ${{ secrets.SCRAPINGANT_API_KEY }}
       SCRAP_API_KEY_V2: ${{ secrets.SCRAP_API_KEY_V2 }}
       
+      WORKER_ID: GITHUB  # 🚀 確認 GitHub 的值勤身分
       PYTHONUNBUFFERED: 1
 
     steps:
@@ -71,34 +70,33 @@ jobs:
       run: |
         sudo apt-get update && sudo apt-get install -y ffmpeg
         python -m pip install --upgrade pip
-        # 🚀 這裡必須補上 flask 與 apscheduler
-        pip install requests beautifulsoup4 supabase python-dotenv boto3 google-generativeai groq feedparser flask apscheduler
+        # 🚀 移除了 flask 等不再需要的套件，讓環境更乾淨
+        pip install requests beautifulsoup4 supabase python-dotenv boto3 google-generativeai groq feedparser
 
-    - name: 🎯 [Step 1] 執行偵察 (Officer)
+    - name: 🏢 [Step 1] 戰區報到與決策 (HQ)
+      # 🚀 新增：蓋章並決定是否要下載
+      run: python src/pod_scr_hq.py
+
+    - name: 🎯 [Step 2] 執行偵察 (Officer)
       env:
         STRATEGY_MODE: ${{ github.event.inputs.force_mode || 'AUTO' }}
       run: |
         echo "📡 [啟動] 偵察官出擊..."
-        python src/pod_scra_officer.py
+        python src/pod_scr_officer.py
 
-    - name: 🚛 [Step 2] 執行搬運 (Fortress Core)
+    - name: 🚛 [Step 3] 執行搬運 (Logistics - 條件觸發)
+      # 🚀 新增：只有 HQ 說 SHOULD_DOWNLOAD=true 時才會執行
+      if: env.SHOULD_DOWNLOAD == 'true'
       run: |
-        echo "🚛 [啟動] 要塞核心運輸模組 (GHA Node)..."
-        # 🚀 關鍵：呼叫 app.py 裡的集成任務
-        python -c "from app import run_integrated_mission; run_integrated_mission()"
-
-    - name: 📡 [Step 3] 遠程動員 (喚醒 Render 執勤官)
-      if: always()
-      run: |
-        echo "🔗 正在向遠程節點發送動員指令..."
-        # 🚀 這裡維持喚醒 Render，確保免費層不會休眠
-        curl -X POST "${{ secrets.RENDER_WEBHOOK_URL }}/ping" \
-             -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
-             --fail || echo "⚠️ 遠程節點無回應，由 GHA 本地處理"
+        echo "🚛 [啟動] 要塞核心運輸模組..."
+        python src/pod_scr_logistics.py
 
     - name: 📝 [Step 4] 情報提煉 (Transport)
-      # 🚀 說明：負責把 R2 檔案變戰報，發到 Telegram
-      run: python src/pod_scra_transport.py
+      run: |
+        echo "📝 [啟動] 情報提煉與 Telegram 報戰..."
+        python src/pod_scr_transport.py
 
     - name: 🧹 [Step 5] 倉庫大掃除 (Cleaner)
-      run: python src/pod_scra_cleaner.py
+      run: |
+        echo "🧹 [啟動] 戰場後勤清理..."
+        python src/pod_scr_cleaner.py
