@@ -77,28 +77,19 @@ jobs:
       # 🚀 HQ v2.0 會產出 SHOULD_DOWNLOAD 與 SHOULD_TRANSPORT 兩個信號
       run: python src/pod_scra_hq.py
 
-    - name: 🎯 [Step 2] 執行偵察 (Officer)
+    - name: 🎯 [Step 2] 執行偵察與掃除 (Officer)
       env:
         STRATEGY_MODE: ${{ github.event.inputs.force_mode || 'AUTO' }}
       run: |
-        echo "📡 [啟動] 偵察官出擊..."
-        python src/pod_scra_officer.py
+        echo "📡 [啟動] 偵察官出擊 (含自動掃除邏輯)..."
+        python src/pod_scra_officer.py 
 
     - name: 🚛 [Step 3] 執行搬運 (Logistics - 條件觸發)
-      # 🚀 只有輪值到 GITHUB 且計數達標時才點火
       if: env.SHOULD_DOWNLOAD == 'true'
-      run: |
-        echo "🚛 [啟動] 要塞核心運輸模組..."
-        python src/pod_scra_logistics.py
+      run: python src/pod_scra_logistics.py  
 
-    - name: 📝 [Step 4] 情報提煉 (Transport - 條件觸發)
-      # 🚀 只有 GHA_TRANSPORT_COUNTER 達標時才消耗 Gemini 配額
+    - name: 📝 [Step 4] 情報生產 (Transport - 條件觸發)
       if: env.SHOULD_TRANSPORT == 'true'
-      run: |
-        echo "📝 [啟動] 情報生產與 Telegram 報戰..."
-        python src/pod_scra_transport.py
+      run: python src/pod_scra_transport.py
 
-    - name: 🧹 [Step 5] 倉庫大掃除 (Cleaner)
-      run: |
-        echo "🧹 [啟動] 戰場後勤清理..."
-        python src/pod_scra_cleaner.py
+    # 🚀 Step 5 已移除，因為功能已併入 Step 2
