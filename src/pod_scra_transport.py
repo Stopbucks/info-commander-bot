@@ -30,7 +30,7 @@ def parse_intel_metrics(text):
 
 def run_transport_and_report():
     # === 🛠️ 戰區控制面板 ===
-    INTEL_LIMIT = 2               # 每次處理 2 筆
+    INTEL_LIMIT = 5               # 每次處理 2 筆/0301更改，處理堆積
     JITTER_BASE_MIN, JITTER_BASE_MAX = 10, 20
     # =========================
 
