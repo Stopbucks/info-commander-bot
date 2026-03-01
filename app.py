@@ -1,7 +1,7 @@
 
 # ---------------------------------------------------------
-# S-Plan Fortress v1.71 (潛行交接版：合體心跳、交接、Jitter)
-# 適用平台：Zeabur, Render, Koyeb (GitHub 同步專用)
+# S-Plan Fortress v1.71  程式碼：app.py 佈署各平台
+# 適用平台：Zeabur, Render, Koyeb (潛行交接版：合體心跳、交接、Jitter)
 # ---------------------------------------------------------
 
 import os, time, json, requests, boto3, re, random, feedparser, threading
