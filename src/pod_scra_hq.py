@@ -1,6 +1,6 @@
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_hq.py v2.0 (雙計數器閉合版)
-# 任務：1. 心跳蓋章 2. 下載頻率控制 3. AI翻譯頻率控制
+# 本程式碼：src/pod_scra_hq.py v2.1 (GHA 專屬記帳版)
+# 任務：1. 心跳蓋章 2. GHA 專屬下載計數 3. GHA 專屬翻譯計數
 # ---------------------------------------------------------
 import os
 from supabase import create_client
@@ -9,13 +9,8 @@ from datetime import datetime, timezone
 # =========================================================
 # 🛠️ 戰區控制面板 (Commander Control Panel)
 # =========================================================
-# 💡 戰術指南：設定「累積幾次純偵察後，才執行重裝任務」
-
-# 1. MP3 下載頻率 (僅限 GITHUB 是主將時才生效)
-SCOUT_TO_DOWNLOAD_RATIO = 2  
-
-# 2. AI 翻譯頻率 (無條件生效，例如數值：2，代表每 3 次啟動，翻譯 1 次)
-SCOUT_TO_TRANSPORT_RATIO = 1 
+SCOUT_TO_DOWNLOAD_RATIO = 2  # 每 2 次純偵察後，執行 1 次下載 (第 3 次執行)
+SCOUT_TO_TRANSPORT_RATIO = 1 # 每 1 次純偵察後，執行 1 次翻譯 (第 2 次執行)
 # =========================================================
 
 def run_hq_decision():
@@ -27,56 +22,55 @@ def run_hq_decision():
     print("=========================================")
     print(f"🛰️ [GITHUB HQ] 戰區報到 | 時間: {now_iso}")
     
-    # 🚀 任務一：心跳蓋章
+    # 🚀 任務一：心跳報到
     health_map = t_data.get('workers_health', {}) or {}
     health_map['GITHUB'] = now_iso
     
-    # 準備一次性更新的資料包
     update_payload = {
         "last_heartbeat_at": now_iso, 
         "workers_health": health_map
     }
-    print("✅ [心跳印章] 已成功更新 GITHUB 生命跡象。")
 
-    # 讀取雙計數器
-    active_worker = t_data.get('active_worker')
-    gha_log_count = t_data.get('gha_logistics_counter', 0)
-    gha_trans_count = t_data.get('gha_transport_counter', 0)
+    # 讀取 GHA 專屬欄位 (對標截圖欄位名)
+    active_worker = tactic.get('active_worker', "UNKNOWN")
+    # 💡 這裡加上預設值判定，若為空則視為 0
+    gha_log_count = t_data.get('gha_logistics_counter') or 0
+    gha_trans_count = t_data.get('gha_transport_counter') or 0
     
     should_download = "false"
     should_transport = "false"
 
-    # 🚀 任務二：判定 MP3 下載 (Logistics)
+    # 🚀 任務二：下載決策 (Logistics) - 僅在執勤時生效
     if active_worker == "GITHUB":
         if gha_log_count >= SCOUT_TO_DOWNLOAD_RATIO:
-            update_payload["gha_logistics_counter"] = 0
+            update_payload["gha_logistics_counter"] = 0 # 達標歸零
             should_download = "true"
-            print(f"🎯 [MP3下載核准] 計數達標 ({gha_log_count}/{SCOUT_TO_DOWNLOAD_RATIO})，核准執行。")
+            print(f"🎯 [物流核准] 計數達標 ({gha_log_count}/{SCOUT_TO_DOWNLOAD_RATIO})，執行下載。")
         else:
             update_payload["gha_logistics_counter"] = gha_log_count + 1
-            print(f"☕ [MP3下載待命] 累積能量中 (目前: {gha_log_count + 1}/{SCOUT_TO_DOWNLOAD_RATIO})。")
+            print(f"☕ [物流待命] 累積能量 (目前: {gha_log_count + 1}/{SCOUT_TO_DOWNLOAD_RATIO})。")
     else:
-        print(f"🛡️ [身分判定] 平時巡邏模式 (當前主將: {active_worker})。跳過 MP3 下載。")
+        print(f"🛡️ [巡邏模式] 目前主將為 {active_worker}，GHA 僅執行純偵察。")
 
-    # 🚀 任務三：判定 AI 翻譯 (Transport)
+    # 🚀 任務三：情報精煉決策 (Transport) - 全天候生效
     if gha_trans_count >= SCOUT_TO_TRANSPORT_RATIO:
-        update_payload["gha_transport_counter"] = 0
+        update_payload["gha_transport_counter"] = 0 # 達標歸零
         should_transport = "true"
-        print(f"🧠 [AI翻譯核准] 計數達標 ({gha_trans_count}/{SCOUT_TO_TRANSPORT_RATIO})，核准交接給 Gemini。")
+        print(f"🧠 [情報核准] 計數達標 ({gha_trans_count}/{SCOUT_TO_TRANSPORT_RATIO})，執行精煉摘要。")
     else:
         update_payload["gha_transport_counter"] = gha_trans_count + 1
-        print(f"☕ [AI翻譯待命] 累積情報中 (目前: {gha_trans_count + 1}/{SCOUT_TO_TRANSPORT_RATIO})。")
+        print(f"☕ [情報待命] 累積物資 (目前: {gha_trans_count + 1}/{SCOUT_TO_TRANSPORT_RATIO})。")
 
-    # 執行資料庫更新
+    # 一次性更新所有黑板紀錄
     sb.table("pod_scra_tactics").update(update_payload).eq("id", 1).execute()
-    print("=========================================")
-
-    # 🚀 任務四：將決策寫入 GitHub 環境變數
+    
+    # 🚀 任務四：將決策寫入環境變數
     env_file = os.environ.get('GITHUB_ENV')
     if env_file:
         with open(env_file, 'a') as f:
             f.write(f"SHOULD_DOWNLOAD={should_download}\n")
             f.write(f"SHOULD_TRANSPORT={should_transport}\n")
+    print("=========================================")
 
 if __name__ == "__main__":
     run_hq_decision()
