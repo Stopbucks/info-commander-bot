@@ -1,16 +1,16 @@
 ##########################################################################
-# 🏃 S-Plan 5.0 全鏈條接力 - 混編艦隊全能偵察版 (2026 旗艦版)
+# 🏃 S-Plan 5.2 全鏈條接力 - 混編艦隊全能偵察版 (2026 旗艦版)
 ##########################################################################
 name: 🏃 S-Plan Universal Fleet
 
 on:
   schedule:
-    # 🚀 每 4 小時巡邏一次，避開整點與 18 分 (對應 UTC 00:35, 04:35, 08:35...)
+    # 🚀 每 4 小時巡邏一次 (對應 UTC 00:35, 04:35, 08:35...)
     - cron: '35 0,4,8,12,16,20 * * *'
   workflow_dispatch:
     inputs:
       force_mode:
-        description: '🚀 選擇作戰模式 (Officer 使用)'
+        description: '🚀 選擇作戰模式'
         required: true
         default: 'AUTO'
         type: choice
@@ -27,7 +27,6 @@ jobs:
     timeout-minutes: 180 
 
     env:
-      # --- 核心連線 ---
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -35,16 +34,10 @@ jobs:
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
       R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
-        
-      # --- AI 引擎 ---
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-
-      # --- 通訊與動員 ---
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      
-      # --- 偵察金鑰 ---
       SCRAP_API_KEY: ${{ secrets.SCRAP_API_KEY }}
       ZENROWS_API_KEY: ${{ secrets.ZENROWS_API_KEY }}
       WEBSCRAP_API_KEY: ${{ secrets.WEBSCRAP_API_KEY }}
@@ -52,7 +45,6 @@ jobs:
       HASDATA_API_KEY: ${{ secrets.HASDATA_API_KEY }}
       SCRAPINGANT_API_KEY: ${{ secrets.SCRAPINGANT_API_KEY }}
       SCRAP_API_KEY_V2: ${{ secrets.SCRAP_API_KEY_V2 }}
-      
       WORKER_ID: GITHUB
       PYTHONUNBUFFERED: 1
     
@@ -70,26 +62,25 @@ jobs:
       run: |
         sudo apt-get update && sudo apt-get install -y ffmpeg
         python -m pip install --upgrade pip
-        # 🚀 升級：加入 lxml 以提升解析穩定度
         pip install requests beautifulsoup4 lxml supabase python-dotenv boto3 google-generativeai groq feedparser
 
     - name: 🏢 [Step 1] 戰區報到與決策 (HQ)
-      # 🚀 HQ v2.0 會產出 SHOULD_DOWNLOAD 與 SHOULD_TRANSPORT 兩個信號
+      # 🚀 HQ v2.3 現在會產出 SHOULD_DOWNLOAD, SHOULD_TRANSPORT 與 SHOULD_COMPRESS
       run: python src/pod_scra_hq.py
 
     - name: 🎯 [Step 2] 執行偵察與掃除 (Officer)
-      env:
-        STRATEGY_MODE: ${{ github.event.inputs.force_mode || 'AUTO' }}
+      # 核心偵察與 17 天清理，不受決策信號影響，每次必跑
       run: |
-        echo "📡 [啟動] 偵察官出擊 (含自動掃除邏輯)..."
+        echo "📡 [啟動] 偵察官出擊..."
         python src/pod_scra_officer.py 
 
-    - name: 🚛 [Step 3] 執行搬運 (Logistics - 條件觸發)
-      if: env.SHOULD_DOWNLOAD == 'true'
-      run: python src/pod_scra_logistics.py  
+    - name: 🚛 [Step 3] 執行搬運與倉庫優化 (Logistics)
+      # 🚀 關鍵邏輯：不論是【主將值勤下載】或是【閒置補救壓縮】，只要任一為真就啟動
+      if: env.SHOULD_DOWNLOAD == 'true' || env.SHOULD_COMPRESS == 'true'
+      run: |
+        echo "🚛 [啟動] 後勤部隊 (下載權限: ${{ env.SHOULD_DOWNLOAD }}, 補救壓縮權限: ${{ env.SHOULD_COMPRESS }})"
+        python src/pod_scra_logistics.py  
 
-    - name: 📝 [Step 4] 情報生產 (Transport - 條件觸發)
+    - name: 📝 [Step 4] 情報生產 (Transport)
       if: env.SHOULD_TRANSPORT == 'true'
       run: python src/pod_scra_transport.py
-
-    # 🚀 Step 5 已移除，因為功能已併入 Step 2
