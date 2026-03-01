@@ -1,5 +1,5 @@
 ##########################################################################
-# 🏃 S-Plan 5.0 全鏈條接力 - 混編艦隊全能偵察版
+# 🏃 S-Plan 5.0 全鏈條接力 - 混編艦隊全能偵察版 (2026 旗艦版)
 ##########################################################################
 name: 🏃 S-Plan Universal Fleet
 
@@ -53,7 +53,7 @@ jobs:
       SCRAPINGANT_API_KEY: ${{ secrets.SCRAPINGANT_API_KEY }}
       SCRAP_API_KEY_V2: ${{ secrets.SCRAP_API_KEY_V2 }}
       
-      WORKER_ID: GITHUB  # 🚀 確認 GitHub 的值勤身分
+      WORKER_ID: GITHUB
       PYTHONUNBUFFERED: 1
     
     steps:
@@ -70,30 +70,35 @@ jobs:
       run: |
         sudo apt-get update && sudo apt-get install -y ffmpeg
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 supabase python-dotenv boto3 google-generativeai groq feedparser
+        # 🚀 升級：加入 lxml 以提升解析穩定度
+        pip install requests beautifulsoup4 lxml supabase python-dotenv boto3 google-generativeai groq feedparser
 
     - name: 🏢 [Step 1] 戰區報到與決策 (HQ)
-      run: python src/pod_scra_hq.py   # 🚀 修正：補上 a
+      # 🚀 HQ v2.0 會產出 SHOULD_DOWNLOAD 與 SHOULD_TRANSPORT 兩個信號
+      run: python src/pod_scra_hq.py
 
     - name: 🎯 [Step 2] 執行偵察 (Officer)
       env:
         STRATEGY_MODE: ${{ github.event.inputs.force_mode || 'AUTO' }}
       run: |
         echo "📡 [啟動] 偵察官出擊..."
-        python src/pod_scra_officer.py   # 🚀 修正：補上 a
+        python src/pod_scra_officer.py
 
     - name: 🚛 [Step 3] 執行搬運 (Logistics - 條件觸發)
+      # 🚀 只有輪值到 GITHUB 且計數達標時才點火
       if: env.SHOULD_DOWNLOAD == 'true'
       run: |
         echo "🚛 [啟動] 要塞核心運輸模組..."
-        python src/pod_scra_logistics.py # 🚀 修正：補上 a
+        python src/pod_scra_logistics.py
 
-    - name: 📝 [Step 4] 情報提煉 (Transport)
+    - name: 📝 [Step 4] 情報提煉 (Transport - 條件觸發)
+      # 🚀 只有 GHA_TRANSPORT_COUNTER 達標時才消耗 Gemini 配額
+      if: env.SHOULD_TRANSPORT == 'true'
       run: |
-        echo "📝 [啟動] 情報提煉與 Telegram 報戰..."
-        python src/pod_scra_transport.py # 🚀 修正：補上 a
+        echo "📝 [啟動] 情報生產與 Telegram 報戰..."
+        python src/pod_scra_transport.py
 
     - name: 🧹 [Step 5] 倉庫大掃除 (Cleaner)
       run: |
         echo "🧹 [啟動] 戰場後勤清理..."
-        python src/pod_scra_cleaner.py   # 🚀 修正：補上 a
+        python src/pod_scra_cleaner.py
