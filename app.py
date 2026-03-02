@@ -15,7 +15,7 @@ app = Flask(__name__)
 
 # === 🎖️ 情報特種兵作戰控制面板 ===
 INTEL_AUDIO_OFFICERS = ["ZEABUR"] 
-INTEL_TXT_OFFICERS = ["KOYEB"] 
+INTEL_TXT_OFFICERS = ["KOYEB","BACK4APP"] 
 
 CONFIG = {
     "WORKER_ID": os.environ.get("WORKER_ID", "UNKNOWN_NODE"),
