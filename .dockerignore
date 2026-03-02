@@ -1,0 +1,44 @@
+# --- 🚫 阻擋 Git 本身資料 (Docker 不需要這些) ---
+.git
+.gitignore
+.dockerignore
+
+# --- 🔐 安全金鑰與敏感環境變數 (核心防線) ---
+# 這些資料應透過 Back4app 的 Environment Variables 設定，不進入 Image
+config/
+service-account.json
+.env
+*.key
+*.pem
+
+# --- 📦 開發環境與地端緩存 (禁止打包進入 Image) ---
+# 虛擬環境與 Python 緩存會大幅增加 Image 體積
+node_modules/
+__pycache__/
+.venv/
+venv/
+.vscode/
+
+# --- 🛰️ 代理與專案特定數據 ---
+podcast_flyproxy_jp/
+podcast_flyproxy_la/
+
+# --- 🧹 排除過往紀錄與任務數據 ---
+# 保持容器內的資料夾純淨，只留啟動程式碼
+archive/
+workspace/
+history_data/
+*.bak
+daily_checkpoint.json*
+*.pyc
+*.json.info
+daily_checkpoint.json
+
+# --- 🎵 排除媒體檔案 (這部分非常重要) ---
+# 避免本地測試下載的 MP3 檔案被誤打包，導致 Image 異常巨大
+*.mp3
+
+# --- 📄 排除非必要的文字檔 ---
+# 同時確保排除所有 .txt，但絕對不能排除 requirements.txt
+*.txt
+!requirements.txt
