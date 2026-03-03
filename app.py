@@ -1,10 +1,11 @@
-# ---------------------------------------------------------
-# S-Plan Fortress v2.1.1 (2026 韌性強化版)
-# 任務：1. 心跳 2. Watchdog 3. AI 接力 4. 役期交接 5. 重型物流
-# 修正：1. 全域排程啟動(解決Render排程不跑問題) 2. 移除冗餘判斷 3. 強化併發穩定性
+
+#  ---------------------------------------------------------
+# S-Plan Fortress v2.2 (2026 鋼鐵黑盒子版)
+# 任務：1. 心跳 2. AI 接力 3. 役期交接 4. 重型物流 5. 遠端日誌 (s_log)
+# 修正：1. 整合 s_log 2. 移除冗餘判斷 3. 強化崩潰回報(traceback)
 # ---------------------------------------------------------
 
-import os, time, json, requests, boto3, re, random, feedparser, threading
+import os, time, json, requests, boto3, re, random, feedparser, threading, traceback
 from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify, request
 from supabase import create_client
@@ -24,6 +25,28 @@ CONFIG = {
     "JITTER_BASE_MIN": 180, "JITTER_BASE_MAX": 360,
     "CRON_SECRET": os.environ.get("CRON_SECRET")
 }
+
+# --- 🚀 戰地通訊兵：精準黑盒子錄製 ---
+def s_log(sb, task_type, status, message, err_stack=None):
+    """
+    將關鍵情報送往總部 (Supabase)，普通訊息保留在本地 print
+    """
+    try:
+        # 本地依然 print，方便開發查看
+        print(f"[{task_type}][{status}] {message}")
+        
+        # 僅針對關鍵節點(SUCCESS)與錯誤(ERROR)發送到 Supabase
+        # 如果是單純的 INFO，我們可以選擇不發送以節省流量，除非您想看「誰起床了」
+        if status in ["SUCCESS", "ERROR"] or "啟動" in message:
+            sb.table("mission_logs").insert({
+                "worker_id": CONFIG["WORKER_ID"],
+                "task_type": task_type,
+                "status": status,
+                "message": message,
+                "traceback": err_stack
+            }).execute()
+    except Exception as e:
+        print(f"⚠️ [日誌發送失敗]: {e}")
 
 def get_sb(): return create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
 def get_s3():
@@ -50,7 +73,8 @@ def trigger_intel_pipeline():
 # --- 🕵️ 核心巡邏邏輯 ---
 def run_integrated_mission():
     sb = get_sb(); now = datetime.now(timezone.utc); now_iso = now.isoformat()
-    print(f"🚀 [{CONFIG['WORKER_ID']}] 巡邏模式點火...")
+    # 🚩 節點 1：巡邏啟動回報
+    s_log(sb, "PATROL", "INFO", "🚀 鋼鐵巡邏模式啟動")
 
     try:
         # --- 階段 1：基礎心跳 ---
@@ -61,15 +85,16 @@ def run_integrated_mission():
         health = tactic.get('workers_health', {}) or {}
         health[CONFIG['WORKER_ID']] = now_iso
         sb.table("pod_scra_tactics").update({"last_heartbeat_at": now_iso, "workers_health": health}).eq("id", 1).execute()
-        print(f"💓 心跳簽到成功。")
+        # 🚩 節點 2：心跳成功 (Success)
+        s_log(sb, "HEARTBEAT", "SUCCESS", "💓 心跳簽到成功")
 
-        # --- 階段 2：Watchdog (已移交 Vercel，此處保持留白) ---
+        # --- 階段 2：Watchdog (由 Vercel 負責，此處留白) ---
 
         # --- 階段 3：AI 情報接力 ---
         trigger_intel_pipeline()
         time.sleep(5) 
 
-        # --- 階段 4：身分與輪值 ---
+        # --- 階段 4：身分與輪值判定 ---
         is_my_turn = (tactic['active_worker'] == CONFIG['WORKER_ID'])
         if not is_my_turn:
             print(f"🛌 [待命] 目前由 {tactic['active_worker']} 值勤。")
@@ -85,7 +110,8 @@ def run_integrated_mission():
             curr_idx = roster.index(CONFIG['WORKER_ID']) if CONFIG['WORKER_ID'] in roster else 0
             new_active = roster[(curr_idx + 1) % len(roster)]
             new_next = roster[(curr_idx + 2) % len(roster)]
-            print(f"⏰ [交接] 移交予: {new_active}")
+            # 🚩 節點 3：役期交接
+            s_log(sb, "DUTY", "SUCCESS", f"⏰ 役期屆滿，移交予: {new_active}")
             sb.table("pod_scra_tactics").update({
                 "active_worker": new_active, "next_worker": new_next,
                 "duty_start_at": now_iso, "consecutive_soft_failures": 0 
@@ -93,7 +119,7 @@ def run_integrated_mission():
             return 
 
         # --- 階段 5：重型物流下載 ---
-        print("🚛 [物流開火] 準備提取音檔物資...")
+        print("🚛 [物流] 準備提取音檔...")
         query_base = sb.table("mission_queue").select("*, mission_program_master(*)") \
                        .eq("scrape_status", "success").lte("troop2_start_at", now_iso)
 
@@ -122,24 +148,27 @@ def run_integrated_mission():
                 s3.upload_file(tmp_path, bucket, file_name)
                 sb.table("mission_queue").update({
                     "scrape_status": "completed", "r2_url": file_name, 
-                    "recon_persona": f"{CONFIG['WORKER_ID']}_v1.9_Resilient" 
+                    "recon_persona": f"{CONFIG['WORKER_ID']}_v2.2_Logged" 
                 }).eq("id", task_id).execute()
                 
-                print(f"✅ {file_name} 入庫完成。")
+                # 🚩 節點 4：物流成功 (Success)
+                s_log(sb, "DOWNLOAD", "SUCCESS", f"✅ 物資入庫完成: {file_name}")
                 if os.path.exists(tmp_path): os.remove(tmp_path)
                 
                 if idx < len(missions) - 1:
                     wait = random.randint(CONFIG['JITTER_BASE_MIN'], CONFIG['JITTER_BASE_MAX'])
-                    print(f"⏳ [Jitter] 釋放記憶體，休息 {wait} 秒...")
                     time.sleep(wait)
             except Exception as e:
-                print(f"❌ 搬運失敗: {e}")
+                # 🚩 節點 5：物流失敗 (Error)
+                stack = traceback.format_exc()
+                s_log(sb, "DOWNLOAD", "ERROR", f"❌ 搬運失敗: {str(e)}", stack)
 
     except Exception as e:
-        print(f"⚠️ 巡邏系統總體崩潰: {e}")
+        # 🚩 節點 6：系統總體崩潰 (Error)
+        stack = traceback.format_exc()
+        s_log(sb, "SYSTEM", "ERROR", f"💥 巡邏系統總體崩潰: {str(e)}", stack)
 
-
-# --- 📡 接口定義 ---
+# --- 📡 接口與排程設定 ---
 @app.route('/ping')
 def trigger():
     token = request.args.get('token')
@@ -148,14 +177,13 @@ def trigger():
     return f"📡 {CONFIG['WORKER_ID']} Fortress: Mission Triggered.", 202
 
 @app.route('/')
-def health(): return f"Fortress {CONFIG['WORKER_ID']} v2.1.1 Active", 200
+def health(): return f"Fortress {CONFIG['WORKER_ID']} v2.2 (Blackbox Mode) Online", 200
 
-# --- 🕒 背景排程 (修正：移至全域確保 Gunicorn 能加載) ---
+# 🕒 全域背景排程啟動器 (確保 Gunicorn 環境下也能點火)
 scheduler = BackgroundScheduler()
 scheduler.add_job(func=run_integrated_mission, trigger="interval", hours=CONFIG["INTERVAL_HOURS"])
 scheduler.start()
 
 if __name__ == "__main__":
-    # 本地測試用
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
