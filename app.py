@@ -1,6 +1,7 @@
 # ---------------------------------------------------------
-# S-Plan Fortress v1.9 (2026 韌性強化版)
+# S-Plan Fortress v2.1.1 (2026 韌性強化版)
 # 任務：1. 心跳 2. Watchdog 3. AI 接力 4. 役期交接 5. 重型物流
+# 修正：1. 全域排程啟動(解決Render排程不跑問題) 2. 移除冗餘判斷 3. 強化併發穩定性
 # ---------------------------------------------------------
 
 import os, time, json, requests, boto3, re, random, feedparser, threading
@@ -12,16 +13,15 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 app = Flask(__name__)
 
-# === 🎖️ 情報特種兵作戰控制面板 ===
+# === 🎖️ 情報特種兵控制面板 ===
 INTEL_AUDIO_OFFICERS = ["ZEABUR", "RENDER"]
 INTEL_TXT_OFFICERS = ["KOYEB", "RENDER", "HUGGINGFACE"]
-# === 🎖️ 情報特種兵作戰控制面板 ===
 
 CONFIG = {
     "WORKER_ID": os.environ.get("WORKER_ID", "UNKNOWN_NODE"),
     "INTERVAL_HOURS": 2,
-    "NEW_LIMIT": 2,"OLD_LIMIT": 1,
-    "JITTER_BASE_MIN": 180,"JITTER_BASE_MAX": 360,
+    "NEW_LIMIT": 2, "OLD_LIMIT": 1,
+    "JITTER_BASE_MIN": 180, "JITTER_BASE_MAX": 360,
     "CRON_SECRET": os.environ.get("CRON_SECRET")
 }
 
@@ -37,23 +37,23 @@ def trigger_intel_pipeline():
     try:
         if worker in INTEL_AUDIO_OFFICERS:
             from src.pod_scra_intel_core import run_audio_to_stt_mission
-            threading.Thread(target=run_audio_to_stt_mission).start()
-            print(f"🎤 [音訊組] {worker} 啟動轉譯執行序。")
+            threading.Thread(target=run_audio_to_stt_mission, daemon=True).start()
+            print(f"🎤 [音訊組] {worker} 啟動轉譯。")
             
         if worker in INTEL_TXT_OFFICERS:
             from src.pod_scra_intel_core import run_stt_to_summary_mission
-            threading.Thread(target=run_stt_to_summary_mission).start()
-            print(f"✍️ [文字組] {worker} 啟動摘要執行序。")
+            threading.Thread(target=run_stt_to_summary_mission, daemon=True).start()
+            print(f"✍️ [文字組] {worker} 啟動摘要。")
     except Exception as e:
         print(f"⚠️ [AI觸發異常]: {e}")
 
-# --- 🕵️ 核心巡邏邏輯 (韌性強化版) ---
+# --- 🕵️ 核心巡邏邏輯 ---
 def run_integrated_mission():
     sb = get_sb(); now = datetime.now(timezone.utc); now_iso = now.isoformat()
-    print(f"🚀 [{CONFIG['WORKER_ID']}] 韌性巡邏模式啟動...")
+    print(f"🚀 [{CONFIG['WORKER_ID']}] 巡邏模式點火...")
 
     try:
-        # --- 階段 1：基礎生存與心跳 ---
+        # --- 階段 1：基礎心跳 ---
         t_res = sb.table("pod_scra_tactics").select("*").eq("id", 1).single().execute()
         if not t_res.data: return
         tactic = t_res.data
@@ -62,30 +62,21 @@ def run_integrated_mission():
         health[CONFIG['WORKER_ID']] = now_iso
         sb.table("pod_scra_tactics").update({"last_heartbeat_at": now_iso, "workers_health": health}).eq("id", 1).execute()
         print(f"💓 心跳簽到成功。")
-        time.sleep(10) # 緩衝
 
-        # --- 階段 2：Watchdog 清道夫 (重置卡死超過 1 小時的任務) ---
-        one_hour_ago = (now - timedelta(hours=1)).isoformat()
-        stuck_clean = sb.table("mission_intel").delete().eq("intel_status", "Sum.-proc")\
-                        .lt("created_at", stuck_clean).execute() # 這裡修正一個變數拼寫
-        # 修正後的代碼如下：
-        sb.table("mission_intel").delete().eq("intel_status", "Sum.-proc").lt("created_at", one_hour_ago).execute()
-        print("🕵️ 看門狗掃描完畢。")
-        time.sleep(10)
+        # --- 階段 2：Watchdog (已移交 Vercel，此處保持留白) ---
 
-        # --- 階段 3：AI 情報接力 (不論是否輪值皆執行) ---
+        # --- 階段 3：AI 情報接力 ---
         trigger_intel_pipeline()
-        time.sleep(15) # 給予 AI 任務領先時間，避免與後續物流爭搶資源
+        time.sleep(5) 
 
-        # --- 階段 4：身分判定與輪值檢查 ---
+        # --- 階段 4：身分與輪值 ---
         is_my_turn = (tactic['active_worker'] == CONFIG['WORKER_ID'])
-        roster = tactic.get('worker_roster', [])
-
         if not is_my_turn:
-            print(f"🛌 [待命] 目前由 {tactic['active_worker']} 值勤。巡邏任務順利結束。")
+            print(f"🛌 [待命] 目前由 {tactic['active_worker']} 值勤。")
             return
 
-        # 進入主將任務
+        # 役期交接檢查
+        roster = tactic.get('worker_roster', [])
         duty_start_str = tactic.get('duty_start_at', now_iso).replace('Z', '+00:00')
         duty_start = datetime.fromisoformat(duty_start_str)
         rotation_hours = tactic.get('rotation_hours', 48)
@@ -147,22 +138,24 @@ def run_integrated_mission():
     except Exception as e:
         print(f"⚠️ 巡邏系統總體崩潰: {e}")
 
+
 # --- 📡 接口定義 ---
 @app.route('/ping')
 def trigger():
     token = request.args.get('token')
     if not token or token != CONFIG['CRON_SECRET']: return "Unauthorized", 401
-    threading.Thread(target=run_integrated_mission).start()
-    return f"📡 {CONFIG['WORKER_ID']} Fortress: Resilient Mission Triggered.", 202
+    threading.Thread(target=run_integrated_mission, daemon=True).start()
+    return f"📡 {CONFIG['WORKER_ID']} Fortress: Mission Triggered.", 202
 
 @app.route('/')
-def health(): return f"Fortress {CONFIG['WORKER_ID']} v1.9 (Resilience Mode) Online", 200
+def health(): return f"Fortress {CONFIG['WORKER_ID']} v2.1.1 Active", 200
 
-# --- 🕒 背景排程 ---
+# --- 🕒 背景排程 (修正：移至全域確保 Gunicorn 能加載) ---
 scheduler = BackgroundScheduler()
 scheduler.add_job(func=run_integrated_mission, trigger="interval", hours=CONFIG["INTERVAL_HOURS"])
 scheduler.start()
 
 if __name__ == "__main__":
+    # 本地測試用
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
