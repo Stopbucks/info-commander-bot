@@ -16,7 +16,7 @@ app = Flask(__name__)
 
 # === 🎖️ 情報控制面板 ===
 INTEL_AUDIO_OFFICERS = ["ZEABUR", "RENDER"]
-INTEL_TXT_OFFICERS = ["KOYEB", "RENDER", "HUGGINGFACE"]
+INTEL_TXT_OFFICERS = ["ZEABUR","KOYEB", "RENDER", "HUGGINGFACE"]
 
 CONFIG = {
     "WORKER_ID": os.environ.get("WORKER_ID", "UNKNOWN_NODE"),
