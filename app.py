@@ -58,7 +58,6 @@ def trigger_intel_pipeline(sb): # 🚀 傳入 sb 以便紀錄日誌
     except Exception as e:
         print(f"⚠️ [AI觸發異常]: {e}")
 
-# --- 🕵️ 核心巡邏邏輯 (規則執行版) ---
 # --- 🕵️ 核心巡邏邏輯 (最終精煉) ---
 def run_integrated_mission():
     sb = get_sb(); now = datetime.now(timezone.utc); now_iso = now.isoformat()
@@ -95,12 +94,20 @@ def run_integrated_mission():
             s_log(sb, "DUTY", "SUCCESS", f"⏰ 役期屆滿，換班至: {new_active}")
             sb.table("pod_scra_tactics").update({"active_worker": new_active, "duty_start_at": now_iso}).eq("id", 1).execute()
             return 
-# --- 階段 5：重型物流 (動態副檔名) ---
-        query_base = sb.table("mission_queue").select("*, mission_program_master(*)") \
-                       .eq("scrape_status", "success").lte("troop2_start_at", now_iso)
-        tasks = (query_base.order("created_at", desc=True).limit(CONFIG['NEW_LIMIT']).execute().data or []) + \
-                (query_base.order("created_at", desc=False).limit(CONFIG['OLD_LIMIT']).execute().data or [])
 
+# --- 階段 5：重型物流 (動態副檔名) ---
+        print("🚛 [物流開火] 準備提取 T2 物資...")
+        
+        # 修正：統一使用 query 變數名稱
+        query = sb.table("mission_queue").select("*, mission_program_master(*)")\
+                  .eq("scrape_status", "success")\
+                  .eq("assigned_troop", "T2")\
+                  .lte("troop2_start_at", now_iso)
+
+        # 修正：將 query_base 改為 query
+        tasks = (query.order("created_at", desc=True).limit(CONFIG['NEW_LIMIT']).execute().data or []) + \
+                (query.order("created_at", desc=False).limit(CONFIG['OLD_LIMIT']).execute().data or [])
+        
         if not tasks:
             print("☕ 戰區暫無待處理物資。"); return
 
