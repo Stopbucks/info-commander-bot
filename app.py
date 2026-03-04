@@ -42,20 +42,24 @@ def get_s3():
                         aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID"),
                         aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY"), region_name="auto")
 
-# --- 🚀 AI 引擎觸發器 ---
-def trigger_intel_pipeline():
+# --- 🚀 AI 引擎觸發器 (增加 s_log 回報) ---
+def trigger_intel_pipeline(sb): # 🚀 傳入 sb 以便紀錄日誌
     worker = CONFIG["WORKER_ID"]
     try:
         if worker in INTEL_AUDIO_OFFICERS:
             from src.pod_scra_intel_core import run_audio_to_stt_mission
             threading.Thread(target=run_audio_to_stt_mission, daemon=True).start()
+            s_log(sb, "AI", "INFO", f"🎤 [音訊組] {worker} 啟動轉譯")
+            
         if worker in INTEL_TXT_OFFICERS:
             from src.pod_scra_intel_core import run_stt_to_summary_mission
             threading.Thread(target=run_stt_to_summary_mission, daemon=True).start()
+            s_log(sb, "AI", "INFO", f"✍️ [文字組] {worker} 啟動摘要")
     except Exception as e:
         print(f"⚠️ [AI觸發異常]: {e}")
 
 # --- 🕵️ 核心巡邏邏輯 (規則執行版) ---
+# --- 🕵️ 核心巡邏邏輯 (最終精煉) ---
 def run_integrated_mission():
     sb = get_sb(); now = datetime.now(timezone.utc); now_iso = now.isoformat()
     s_log(sb, "PATROL", "INFO", "🚀 戰術巡邏模式啟動")
@@ -66,19 +70,17 @@ def run_integrated_mission():
         if not t_res.data: return
         tactic = t_res.data
         
-        # 領取黑名單
         rule_res = sb.table("pod_scra_rules").select("domain").eq("worker_id", CONFIG["WORKER_ID"]).execute()
         my_blacklist = [r['domain'] for r in rule_res.data] if rule_res.data else []
         
-        # 心跳簽到
         health = tactic.get('workers_health', {}) or {}
         health[CONFIG['WORKER_ID']] = now_iso
         sb.table("pod_scra_tactics").update({"last_heartbeat_at": now_iso, "workers_health": health}).eq("id", 1).execute()
-        s_log(sb, "HEARTBEAT", "SUCCESS", f"💓 心跳成功 (禁領區數: {len(my_blacklist)})")
+        s_log(sb, "HEARTBEAT", "SUCCESS", f"💓 心跳成功 (黑名單數: {len(my_blacklist)})")
 
         # --- 階段 3：AI 情報接力 ---
-        trigger_intel_pipeline()
-        time.sleep(5) 
+        trigger_intel_pipeline(sb) # 🚀 傳入 sb
+        time.sleep(5)
 
         # --- 階段 4：身分與輪值判定 ---
         is_my_turn = (tactic['active_worker'] == CONFIG['WORKER_ID'])
@@ -93,13 +95,9 @@ def run_integrated_mission():
             s_log(sb, "DUTY", "SUCCESS", f"⏰ 役期屆滿，換班至: {new_active}")
             sb.table("pod_scra_tactics").update({"active_worker": new_active, "duty_start_at": now_iso}).eq("id", 1).execute()
             return 
-
-        # --- 階段 5：重型物流 (含自動黑名單) ---
-        print("🚛 [物流開火] 準備提取物資...")
-        # ✅ 補齊處：從資料庫獲取待下載任務
+# --- 階段 5：重型物流 (動態副檔名) ---
         query_base = sb.table("mission_queue").select("*, mission_program_master(*)") \
                        .eq("scrape_status", "success").lte("troop2_start_at", now_iso)
-        
         tasks = (query_base.order("created_at", desc=True).limit(CONFIG['NEW_LIMIT']).execute().data or []) + \
                 (query_base.order("created_at", desc=False).limit(CONFIG['OLD_LIMIT']).execute().data or [])
 
@@ -111,13 +109,16 @@ def run_integrated_mission():
             f_url = m.get('audio_url')
             if not f_url: continue
             
-            # 🕵️ 黑名單規避檢查
             target_domain = urlparse(f_url).netloc
             if any(b_domain in target_domain for b_domain in my_blacklist):
-                print(f"⏩ [戰術規避] {target_domain} 處於禁閉期，跳過。")
+                print(f"⏩ [ROE規避] {target_domain} 處於禁閉期，跳過。")
                 continue
 
-            tmp_path = f"/tmp/{now.strftime('%Y%m%d')}_{m['id'][:8]}.mp3"
+            # 🚀 修正：動態偵測副檔名
+            path_part = urlparse(f_url).path
+            ext = os.path.splitext(path_part)[1] or ".mp3" # 如果沒抓到就預設 .mp3
+            tmp_path = f"/tmp/{now.strftime('%Y%m%d')}_{m['id'][:8]}{ext}"
+            
             try:
                 with requests.get(f_url, stream=True, timeout=120) as r:
                     r.raise_for_status()
@@ -131,28 +132,25 @@ def run_integrated_mission():
 
             except requests.exceptions.HTTPError as he:
                 if he.response.status_code == 403:
-                    # 🚨 遭遇 403：回報黑名單並緊急換班
                     new_commander = roster[(roster.index(CONFIG['WORKER_ID']) + 1) % len(roster)]
-                    s_log(sb, "SYSTEM", "ERROR", f"🚫 403 封鎖！列入黑名單: {target_domain}，交接至: {new_commander}")
+                    s_log(sb, "SYSTEM", "ERROR", f"🚫 403 封鎖！將 {target_domain} 列入黑名單，交接至: {new_commander}")
                     
-                    # 1. 寫入黑名單表 (預設 7 天)
                     sb.table("pod_scra_rules").insert({
                         "worker_id": CONFIG["WORKER_ID"],
                         "domain": target_domain,
                         "expired_at": (now + timedelta(days=7)).isoformat()
                     }).execute()
                     
-                    # 2. 立即換班
                     sb.table("pod_scra_tactics").update({
                         "active_worker": new_commander, "duty_start_at": now_iso, "last_error_type": f"403_BANNED_{target_domain}"
                     }).eq("id", 1).execute()
                     return 
-                else:
-                    s_log(sb, "DOWNLOAD", "ERROR", f"❌ HTTP錯誤: {he}", traceback.format_exc())
             except Exception as e:
                 s_log(sb, "DOWNLOAD", "ERROR", f"❌ 搬運失敗: {str(e)}", traceback.format_exc())
             finally:
-                if os.path.exists(tmp_path): os.remove(tmp_path)
+                if os.path.exists(tmp_path): 
+                    try: os.remove(tmp_path)
+                    except: pass
             
             if idx < len(tasks) - 1: time.sleep(random.randint(CONFIG['JITTER_BASE_MIN'], CONFIG['JITTER_BASE_MAX']))
 
