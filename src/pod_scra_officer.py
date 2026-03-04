@@ -1,16 +1,14 @@
+
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_officer.py v9.0 
-# 任務：1. 偵查 2新+1舊 2. 有網址直接抓 3. RSS 優先 4. 戰利品回填 5.清理supabase 6.重新偵查
-# ---------------------------------------------------------
-# ---------------------------------------------------------
-# 本程式碼：src/pod_scra_officer.py v9.2 (黑盒子數據化版)
+# 本程式碼：src/pod_scra_officer.py v10  
 # 任務：1. 偵查 2新+1舊 2. 失敗日誌回填(JSONB) 3. RSS 優先 4. 戰場清理
 # ---------------------------------------------------------
 import os, requests, time, re, json, random, feedparser
-from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse 
+from datetime import datetime, timezone, timedelta # ✅ 確保這裡正確即可
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
-from pod_scra_scanner import fetch_html 
+from pod_scra_scanner import fetch_html
 
 ACTIVE_STRATEGY = 1 
 STRATEGY_MAP = {
@@ -78,6 +76,7 @@ def run_scra_officer():
                             "episode_title": entry.title[:100],
                             "podbay_slug": s["podbay_slug"],
                             "scrape_status": "pending",
+                            "assigned_troop": "T2",  # 🚀 必須明確標註，否則 v2.5 主將領不到
                             "troop2_start_at": fire_time.isoformat()
                         }).execute()
                         print(f"✅ 發現新集數: {s['program_name']}")
@@ -101,7 +100,6 @@ def run_scra_officer():
         
         if persona_label in history: continue 
 
-        # --- RSS 優先協議 (略...) ---
         # --- RSS 優先協議 ---
         if master and master.get('rss_feed_url'):
             try:
@@ -159,6 +157,17 @@ def run_scra_officer():
                         sb.table("mission_queue").update(upd).eq("id", task_id).execute()
                         print(f"⚠️ [偵察失敗] 頁面已開但無有效音檔連結。")
 
+                elif resp and resp.status_code == 403: # 🚀 新增 403 監測
+                    target_domain = urlparse(f"https://podbay.fm/p/{slug}").netloc
+                    print(f"🚫 [ROE檢舉] GITHUB 偵察遭遇 403：{target_domain}")
+                    # 寫入黑名單，讓 Vercel 啟動 17 天禁運
+                    sb.table("pod_scra_rules").insert({
+                        "worker_id": "GITHUB_OFFICER",
+                        "domain": target_domain,
+                        "expired_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+                    }).execute()
+                    log_recon_failure(sb, task_id, provider, source_name, "HTTP_403_FORBIDDEN")
+                
                 # 🛡️ 判定 B：請求受阻 (非 200 狀態碼)
                 else:
                     reason = f"HTTP_{resp.status_code}" if resp else "NO_RESPONSE"
