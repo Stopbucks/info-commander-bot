@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 app = Flask(__name__)
 
 # === 🎖️ 情報控制面板 ===
-INTEL_AUDIO_OFFICERS = ["ZEABUR", "FLY_LAX", "RENDER"]
+INTEL_AUDIO_OFFICERS = ["ZEABUR", "FLY_LAX", "RENDER", "HUGGINGFACE"] # 🚀 已加入 HF 至影音組
 INTEL_TXT_OFFICERS = ["ZEABUR","KOYEB", "RENDER", "HUGGINGFACE"]
 
 CONFIG = {
