@@ -1,11 +1,7 @@
 
+
 # ---------------------------------------------------------
-# src/pod_scra_intel_core.py v1.5 (2026 REST 韌性強化版)
-# 模型：Gemini 2.5 Flash 勿動
-# 任務：1. 隨機分流 2. 輕量 REST + Opus傳輸 3. 量化指標自動入庫
-# ---------------------------------------------------------
-# ---------------------------------------------------------
-# src/pod_scra_intel_core.py v1.6 (2026 鋼鐵韌性加固版)
+# src/pod_scra_intel_core.py v1.8 (2026 鋼鐵韌性除錯強化)
 # 任務：1. 階梯式任務發動 2. 記憶體強制回收 3. API 重試邏輯
 # ---------------------------------------------------------
 import os, requests, json, time, random, base64, re, gc
@@ -42,10 +38,9 @@ def parse_intel_metrics(text):
     return metrics
 
 # =========================================================
-# 🎤 第一棒：Audio to STT (產線調度官)
+# 🎤 第一棒：Audio to STT (產線調度官 - 偵查碼加強版)
 # =========================================================
 def run_audio_to_stt_mission():
-    # 戰術延遲：防止多節點併發搶佔
     time.sleep(random.uniform(3.0, 8.0))
     sb = get_sb(); s = get_secrets()
     
@@ -58,9 +53,8 @@ def run_audio_to_stt_mission():
         if check.data: continue
 
         chosen_provider = random.choice(["GROQ", "GEMINI"])
-        print(f"🎲 [分流] 任務 {task_id[:8]} -> [{chosen_provider}]")
+        print(f"🎲 [第一棒偵查] 任務 {task_id[:8]} 分流至 -> [{chosen_provider}]")
         
-        # 🔒 標記開始處理
         sb.table("mission_intel").insert({
             "task_id": task_id, "intel_status": "Sum.-proc", "ai_provider": chosen_provider
         }).execute()
@@ -68,14 +62,15 @@ def run_audio_to_stt_mission():
         try:
             if chosen_provider == "GROQ":
                 audio_url = f"{s['R2_URL']}/{task['r2_url']}"
+                print(f"📥 [第一棒偵查] GROQ 模式：從 R2 下載音檔進行轉譯... URL: {audio_url}")
                 audio_data = requests.get(audio_url, timeout=60).content
-                time.sleep(1.5) # 給予網路緩衝
+                time.sleep(1.5)
 
                 headers = {"Authorization": f"Bearer {s['GROQ_KEY']}"}
                 files = {'file': (task['r2_url'], audio_data, 'audio/mpeg')}
                 data = {'model': 'whisper-large-v3', 'response_format': 'text', 'language': 'en'}
                 
-                # 執行 API (內建簡單重試邏輯)
+                print(f"🎙️ [第一棒偵查] 送往 Groq Whisper 模型...")
                 stt_resp = requests.post("https://api.groq.com/openai/v1/audio/transcriptions", 
                                          headers=headers, files=files, data=data, timeout=120)
                 
@@ -83,44 +78,62 @@ def run_audio_to_stt_mission():
                     sb.table("mission_intel").update({
                         "stt_text": stt_resp.text, "intel_status": "Sum.-pre"
                     }).eq("task_id", task_id).execute()
-                    print(f"✅ [GROQ] 轉譯成功")
-                else: raise Exception(f"Groq API Fail: {stt_resp.status_code}")
+                    print(f"✅ [第一棒偵查] Groq Whisper 轉譯成功！")
+                else:
+                    # 🚀 關鍵修正：此處會印出 Groq 官方的詳細報錯原因
+                    print(f"❌ [第一棒偵查] Groq Whisper 失敗！狀態碼: {stt_resp.status_code}")
+                    print(f"📑 [報錯細節]: {stt_resp.text}") 
+                    raise Exception(f"Whisper Fail: {stt_resp.status_code}")
                 
-                # 🧹 清理大型二進位變數
                 del audio_data; gc.collect()
 
             else:
-                # GEMINI 原生流不需在此下載，直接標記交棒
+                # GEMINI 路徑 (不在此執行轉譯，僅標記)
                 sb.table("mission_intel").update({
                     "stt_text": "[GEMINI_2.5_NATIVE_STREAM]", "intel_status": "Sum.-pre"
                 }).eq("task_id", task_id).execute()
-                print(f"✅ [GEMINI] 已鎖定原生流")
+                print(f"✅ [第一棒偵查] GEMINI 原生流已鎖定。")
 
         except Exception as e:
-            print(f"❌ [第一棒異常]: {e}")
+            print(f"💥 [第一棒偵查] 任務崩潰: {str(e)}")
+            # 發生異常則退回，刪除進度讓下次重來
             sb.table("mission_intel").delete().eq("task_id", task_id).execute()
+            print(f"🛡️ [第一棒偵查] 已刪除任務記錄，系統將自動重啟此任務。")
+
 
 # =========================================================
-# ✍️ 第二棒：STT to Summary (情報精煉官)
+# ✍️ 第二棒：STT to Summary (情報精煉官 - 偵查碼加強版)
 # =========================================================
 def run_stt_to_summary_mission():
-    # 戰術延遲
+    # 戰術延遲：防止多節點併發搶佔
     time.sleep(random.uniform(3.0, 8.0))
     sb = get_sb(); s = get_secrets()
     
+    # 1. 偵查待處理物資
     res = sb.table("mission_intel").select("*, mission_queue(episode_title, source_name, r2_url)")\
             .eq("intel_status", "Sum.-pre").limit(1).execute()
     
+    #---run_stt_to_summary_mission 前面邏輯相同---#
+    # -----(定位線)以下修改：全量 Print 偵查碼-----
+
+    if not res.data:
+        print("☕ [偵查] 目前資料庫暫無待摘要物資 (Sum.-pre)，哨所待命。")
+        return
+
     for intel in (res.data or []):
         task_id = intel['task_id']
-        provider = intel['ai_provider']
-        print(f"✍️ [精煉] 產線: {provider} | 任務: {intel['mission_queue']['episode_title'][:15]}...")
+        title = intel['mission_queue']['episode_title']
+        print(f"📡 [偵查] 啟動摘要任務 ID: {task_id[:8]} | 標題: {title[:20]}...")
         
         p_res = sb.table("pod_scra_metadata").select("content").eq("key_name", "PROMPT_FALLBACK").single().execute()
         sys_prompt = p_res.data['content'] if p_res.data else "請分析情報。"
 
         try:
             summary = ""
+            provider = intel['ai_provider']
+            print(f"🤖 [偵查] 目前指定 AI 供應商: {provider}")
+
+            # 分流處理 A: GROQ
             if provider == "GROQ":
                 payload = {
                     "model": "llama-3.3-70b-versatile",
@@ -132,14 +145,18 @@ def run_stt_to_summary_mission():
                                         headers={"Authorization": f"Bearer {s['GROQ_KEY']}"}, json=payload, timeout=90)
                 if ai_resp.status_code == 200:
                     summary = ai_resp.json()['choices'][0]['message']['content']
+                    print(f"✅ [偵查] GROQ 摘要生成成功，長度: {len(summary)}")
+                else:
+                    print(f"❌ [偵查] GROQ API 報錯: {ai_resp.status_code} | 回應: {ai_resp.text}")
 
+            # 分流處理 B: GEMINI
             elif provider == "GEMINI":
                 audio_url = f"{s['R2_URL']}/{intel['mission_queue']['r2_url']}"
-                # 🛠️ 記憶體與網路加固：
+                print(f"📥 [偵查] 下載音檔至內存執行原生流... URL: {audio_url}")
                 raw_bytes = requests.get(audio_url, timeout=120).content
-                time.sleep(2.0) # 下載後稍微喘息
+                time.sleep(2.0)
                 b64_audio = base64.b64encode(raw_bytes).decode('utf-8')
-                del raw_bytes; gc.collect() # 立即釋放原始二進位
+                del raw_bytes; gc.collect()
 
                 gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={s['GEMINI_KEY']}"
                 payload = {
@@ -149,29 +166,42 @@ def run_stt_to_summary_mission():
                 ai_resp = requests.post(gemini_url, json=payload, timeout=180)
                 if ai_resp.status_code == 200:
                     summary = ai_resp.json()['candidates'][0]['content']['parts'][0]['text']
-                
-                # 🧹 徹底清理
+                    print(f"✅ [偵查] GEMINI 摘要生成成功，長度: {len(summary)}")
+                else:
+                    print(f"❌ [偵查] GEMINI API 報錯: {ai_resp.status_code} | 回應: {ai_resp.text}")
                 del b64_audio; gc.collect()
 
+            # 2. 成果入庫與 Telegram 通報
             if summary:
                 m = parse_intel_metrics(summary)
-                # 先入庫，確保數據安全
                 sb.table("mission_intel").update({
                     "summary_text": summary, "intel_status": "Sum.-ready",
                     "report_date": datetime.now().strftime("%Y-%m-%d"),
                     "total_score": m["score"], "evidence_count": m["evidence"]
                 }).eq("task_id", task_id).execute()
+                print("💾 [偵查] 摘要已安全存入資料庫，狀態更新為 Sum.-ready")
                 
-                # 發送 TG (最後一步，失敗也不影響數據已存檔)
-                time.sleep(1.5)
-                report_msg = f"🎙️ {intel['mission_queue']['source_name']}\n📌 {intel['mission_queue']['episode_title']}\n\n{summary}"
-                tg_resp = requests.post(f"https://api.telegram.org/bot{s['TG_TOKEN']}/sendMessage", 
-                                        json={"chat_id": s["TG_CHAT"], "text": report_msg[:4000], "parse_mode": "Markdown"})
-                
-                if tg_resp.status_code == 200:
-                    sb.table("mission_intel").update({"intel_status": "Sum.-sent"}).eq("task_id", task_id).execute()
-                    print(f"✅ [成功] 任務 {task_id[:8]} 情報已結案")
+                # --- 🔍 核心偵查點：Telegram 金鑰與環境變數檢查 ---
+                if not s["TG_TOKEN"] or not s["TG_CHAT"]:
+                    print("⚠️ [偵查] 警報：環境變數中找不到 TG_TOKEN 或 TG_CHAT，放棄發送！")
+                else:
+                    print(f"📤 [偵查] 準備發送 Telegram 訊息至 Chat ID: {s['TG_CHAT']}...")
+                    time.sleep(1.5)
+                    report_msg = f"🎙️ {intel['mission_queue']['source_name']}\n📌 {intel['mission_queue']['episode_title']}\n\n{summary}"
+                    tg_resp = requests.post(f"https://api.telegram.org/bot{s['TG_TOKEN']}/sendMessage", 
+                                            json={"chat_id": s["TG_CHAT"], "text": report_msg[:4000], "parse_mode": "Markdown"})
+                    
+                    if tg_resp.status_code == 200:
+                        sb.table("mission_intel").update({"intel_status": "Sum.-sent"}).eq("task_id", task_id).execute()
+                        print(f"🎉 [偵查] Telegram 通報成功！任務結案。")
+                    else:
+                        print(f"❌ [偵查] Telegram 通報失敗！代碼: {tg_resp.status_code} | 回應: {tg_resp.text}")
+            else:
+                print("⚠️ [偵查] 摘要內容為空，跳過存檔與通報程序。")
 
         except Exception as e:
-            print(f"❌ [第二棒崩潰]: {e}")
-            # 發生崩潰時不刪除，讓 Vercel 清道夫在一小時後回收
+            print(f"💥 [偵查] 任務執行中崩潰: {str(e)}")
+            import traceback
+            print(traceback.format_exc()) # 噴出完整錯誤堆疊以便定位
+
+# 修改於0305
