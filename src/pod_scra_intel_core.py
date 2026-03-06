@@ -1,7 +1,7 @@
 
 
 # ---------------------------------------------------------
-# src/pod_scra_intel_core.py v1.8 (2026 鋼鐵韌性除錯強化)
+# src/pod_scra_intel_core.py v2 (2026 容錯強化)
 # 任務：1. 階梯式任務發動 2. 記憶體強制回收 3. API 重試邏輯
 # ---------------------------------------------------------
 import os, requests, json, time, random, base64, re, gc
@@ -151,27 +151,37 @@ def run_stt_to_summary_mission():
                     print(f"❌ [偵查] GROQ API 報錯: {ai_resp.status_code} | 回應: {ai_resp.text}")
 
             # 分流處理 B: GEMINI
+            # --- 修正後的 GEMINI 處理區塊 ---
             elif provider == "GEMINI":
+
                 audio_url = f"{s['R2_URL']}/{intel['mission_queue']['r2_url']}"
                 print(f"📥 [偵查] 下載音檔至內存執行原生流... URL: {audio_url}")
                 raw_bytes = requests.get(audio_url, timeout=120).content
-                time.sleep(2.0)
+                
+                # 🚀 第一次清理：轉換完 Base64 立即釋放原始字節
                 b64_audio = base64.b64encode(raw_bytes).decode('utf-8')
-                del raw_bytes; gc.collect()
+                del raw_bytes 
+                gc.collect() 
 
+                # 準備發送到 Gemini
                 gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={s['GEMINI_KEY']}"
                 payload = {
                     "contents": [{"parts": [{"text": sys_prompt},
-                                           {"inline_data": {"mime_type": "audio/mpeg", "data": b64_audio}}]}]
+                                            {"inline_data": {"mime_type": "audio/mpeg", "data": b64_audio}}]}]
                 }
+                
+                # 🚀 核心動作：發送請求
                 ai_resp = requests.post(gemini_url, json=payload, timeout=180)
+                
                 if ai_resp.status_code == 200:
                     summary = ai_resp.json()['candidates'][0]['content']['parts'][0]['text']
                     print(f"✅ [偵查] GEMINI 摘要生成成功，長度: {len(summary)}")
                 else:
                     print(f"❌ [偵查] GEMINI API 報錯: {ai_resp.status_code} | 回應: {ai_resp.text}")
-                del b64_audio; gc.collect()
 
+                # 🚀 第二次清理：收到回應後立即釋放龐大的 Base64 字串
+                del b64_audio
+                gc.collect()
             # 2. 成果入庫與 Telegram 通報
             if summary:
                 m = parse_intel_metrics(summary)

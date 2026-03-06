@@ -14,8 +14,8 @@ app = Flask(__name__)
 
 # === 🎖️ 情報控制面板 ===
 # 已修正 FLY_LAX 重複問題並確保各組名單正確
-INTEL_AUDIO_OFFICERS = ["ZEABUR", "FLY_LAX", "RENDER", "HUGGINGFACE", "BACK4APP"] 
-INTEL_TXT_OFFICERS = ["ZEABUR", "KOYEB", "RENDER", "HUGGINGFACE", "FLY_LAX", "BACK4APP"]
+INTEL_AUDIO_OFFICERS = ["ZEABUR", "FLY_LAX", "RENDER", "HUGGINGFACE"] 
+INTEL_TXT_OFFICERS = ["ZEABUR", "KOYEB", "RENDER", "HUGGINGFACE", "FLY_LAX"]
 
 CONFIG = {
     "WORKER_ID": os.environ.get("WORKER_ID", "UNKNOWN_NODE"),
@@ -45,72 +45,56 @@ def get_s3():
 MISSION_LOCK = threading.Lock()
 IS_RUNNING = False
 
+# === 🛡️ 任務調度器 (序列化 + GC 資源回收版) ===
 def trigger_intel_pipeline(sb):
     worker = CONFIG["WORKER_ID"]
     try:
-        gc.collect() # 啟動任務前強制資源回收
+        # 1. 先跑音訊組任務
         if worker in INTEL_AUDIO_OFFICERS:
             from src.pod_scra_intel_core import run_audio_to_stt_mission
-            threading.Thread(target=run_audio_to_stt_mission, daemon=True).start()
             s_log(sb, "AI", "INFO", f"🎤 [音訊組] {worker} 啟動轉譯")
+            run_audio_to_stt_mission() # 🚀 直接執行
+            gc.collect()
+
+        # 給系統喘息時間，防止資料庫連線過載
+        time.sleep(random.randint(15, 30))
+
+        # 2. 接著跑文字組任務
         if worker in INTEL_TXT_OFFICERS:
             from src.pod_scra_intel_core import run_stt_to_summary_mission
-            threading.Thread(target=run_stt_to_summary_mission, daemon=True).start()
             s_log(sb, "AI", "INFO", f"✍️ [文字組] {worker} 啟動摘要")
+            run_stt_to_summary_mission() # 🚀 直接執行
+            gc.collect()
+            
     except Exception as e:
-        print(f"⚠️ [AI觸發異常]: {e}")
+        print(f"⚠️ [AI序列異常]: {e}"); gc.collect()
 
 def run_integrated_mission():
     global IS_RUNNING
-    # 🛡️ 執行緒防禦：防止記憶體爆擊
-    if IS_RUNNING:
-        print("🛑 [規避] 偵測到已有任務執行中，取消本次巡邏。")
-        return
-
+    if IS_RUNNING: return
     with MISSION_LOCK:
         IS_RUNNING = True
         sb = get_sb(); now = datetime.now(timezone.utc); now_iso = now.isoformat()
-        s_log(sb, "PATROL", "INFO", "🚀 戰術巡邏模式啟動")
-
+        
         try:
-            # --- 階段 1：領取戰術規則與執行官狀態 ---
+            # --- 階段 1-3：心跳與 AI 序列化執行 ---
             t_res = sb.table("pod_scra_tactics").select("*").eq("id", 1).single().execute()
-            if not t_res.data: 
-                IS_RUNNING = False
-                return
+            if not t_res.data: return
             tactic = t_res.data
             
-            # --- 階段 2：同步黑名單與心跳 ---
-            rule_res = sb.table("pod_scra_rules").select("domain").eq("worker_id", CONFIG["WORKER_ID"]).execute()
-            my_blacklist = [r['domain'] for r in rule_res.data] if rule_res.data else []
+            # 心跳蓋章
             health = tactic.get('workers_health', {}) or {}
             health[CONFIG['WORKER_ID']] = now_iso
             sb.table("pod_scra_tactics").update({"last_heartbeat_at": now_iso, "workers_health": health}).eq("id", 1).execute()
-            s_log(sb, "HEARTBEAT", "SUCCESS", f"💓 心跳成功 (黑名單數: {len(my_blacklist)})")
 
-            # --- 階段 3：AI 情報接力 ---
+            # 🚀 序列化執行 AI 任務 (轉譯 -> 摘要)
             trigger_intel_pipeline(sb)
-            time.sleep(5)
 
-            # --- 階段 4：身分與輪值判定 ---
-            roster = tactic.get('worker_roster', [])
+            # --- 階段 4：身分判定 ---
             if tactic['active_worker'] != CONFIG['WORKER_ID']:
-                print(f"🛌 [待命] 目前由 {tactic['active_worker']} 值勤。")
-                IS_RUNNING = False
-                return
+                print(f"🛌 [待命] 非主將身分，結束巡邏。"); return
 
-            duty_start = datetime.fromisoformat(tactic.get('duty_start_at', now_iso).replace('Z', '+00:00'))
-            if now > duty_start + timedelta(hours=tactic.get('rotation_hours', 48)):
-                try:
-                    current_idx = roster.index(CONFIG['WORKER_ID'])
-                    new_active = roster[(current_idx + 1) % len(roster)]
-                    s_log(sb, "DUTY", "SUCCESS", f"⏰ 役期屆滿，換班至: {new_active}")
-                    sb.table("pod_scra_tactics").update({"active_worker": new_active, "duty_start_at": now_iso}).eq("id", 1).execute()
-                    IS_RUNNING = False
-                    return 
-                except ValueError: pass
-
-            # --- 階段 5：重型物流 (修正縮排錯誤) ---
+            # --- 階段 5：重型物流 (遇錯即休模式) ---
             print("🚛 [物流開火] 準備提取 T2 物資...")
             query = sb.table("mission_queue").select("*, mission_program_master(*)")\
                       .eq("scrape_status", "success").eq("assigned_troop", "T2")\
@@ -145,18 +129,20 @@ def run_integrated_mission():
                         s3.upload_file(tmp_path, bucket, file_name)
                         sb.table("mission_queue").update({"scrape_status": "completed", "r2_url": file_name}).eq("id", m['id']).execute()
                         s_log(sb, "DOWNLOAD", "SUCCESS", f"✅ 物資入庫: {file_name}")
-
+                    
                     except requests.exceptions.HTTPError as he:
                         if he.response.status_code == 403:
-                            current_idx = roster.index(CONFIG['WORKER_ID'])
-                            new_commander = roster[(current_idx + 1) % len(roster)]
-                            s_log(sb, "SYSTEM", "ERROR", f"🚫 403 封鎖！將 {target_domain} 列入黑名單，交接至: {new_commander}")
-                            sb.table("pod_scra_rules").insert({"worker_id": CONFIG["WORKER_ID"], "domain": target_domain, "expired_at": (now + timedelta(days=7)).isoformat()}).execute()
-                            sb.table("pod_scra_tactics").update({"active_worker": new_commander, "duty_start_at": now_iso}).eq("id", 1).execute()
-                            IS_RUNNING = False
-                            return 
+                            # 🚀 紀律調整：不自作主張換班，僅寫入報警，交給 Vercel 裁決
+                            target_domain = urlparse(f_url).netloc
+                            s_log(sb, "SYSTEM", "ERROR", f"🚫 403 封鎖！{target_domain}，等待裁決")
+                            sb.table("pod_scra_tactics").update({
+                                "last_error_type": f"403_BANNED_{target_domain}"
+                            }).eq("id", 1).execute()
+                            return # 立即停止，進入休息狀態
+                    
                     except Exception as e:
-                        s_log(sb, "DOWNLOAD", "ERROR", f"❌ 搬運失敗: {str(e)}", traceback.format_exc())
+                        s_log(sb, "DOWNLOAD", "ERROR", f"❌ 搬運失敗: {str(e)}")
+                    
                     finally:
                         if os.path.exists(tmp_path): 
                             try: os.remove(tmp_path)
