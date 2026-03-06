@@ -77,22 +77,27 @@ def run_integrated_mission():
         sb = get_sb(); now = datetime.now(timezone.utc); now_iso = now.isoformat()
         
         try:
-            # --- 階段 1-3：心跳與 AI 序列化執行 ---
+            # --- 階段 1：心跳蓋章 ---
             t_res = sb.table("pod_scra_tactics").select("*").eq("id", 1).single().execute()
             if not t_res.data: return
             tactic = t_res.data
             
-            # 心跳蓋章
             health = tactic.get('workers_health', {}) or {}
             health[CONFIG['WORKER_ID']] = now_iso
             sb.table("pod_scra_tactics").update({"last_heartbeat_at": now_iso, "workers_health": health}).eq("id", 1).execute()
 
-            # 🚀 序列化執行 AI 任務 (轉譯 -> 摘要)
+            # --- 🚀 階段 2：同步黑名單 (這是您漏掉的關鍵！) ---
+            rule_res = sb.table("pod_scra_rules").select("domain").eq("worker_id", CONFIG["WORKER_ID"]).execute()
+            my_blacklist = [r['domain'] for r in rule_res.data] if rule_res.data else []
+            s_log(sb, "HEARTBEAT", "SUCCESS", f"💓 {CONFIG['WORKER_ID']} 心跳成功 (黑名單數: {len(my_blacklist)})")
+
+            # --- 🚀 階段 3：序列化執行 AI 任務 ---
             trigger_intel_pipeline(sb)
 
             # --- 階段 4：身分判定 ---
             if tactic['active_worker'] != CONFIG['WORKER_ID']:
-                print(f"🛌 [待命] 非主將身分，結束巡邏。"); return
+                print(f"🛌 [待命] 目前由 {tactic['active_worker']} 值勤，非主將身分，結束巡邏。")
+                return
 
             # --- 階段 5：重型物流 (遇錯即休模式) ---
             print("🚛 [物流開火] 準備提取 T2 物資...")
