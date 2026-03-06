@@ -110,11 +110,12 @@ def run_stt_to_summary_mission():
     sb = get_sb(); s = get_secrets()
     
     # 1. 偵查待處理物資
+    #  🚀 文字組處理數量修改區域 
     res = sb.table("mission_intel").select("*, mission_queue(episode_title, source_name, r2_url)")\
-            .eq("intel_status", "Sum.-pre").limit(1).execute()
+            .eq("intel_status", "Sum.-pre").limit(2).execute()
     
-    #---run_stt_to_summary_mission 前面邏輯相同---#
-    # -----(定位線)以下修改：全量 Print 偵查碼-----
+    #  🚀 文字組 
+    #---文字組處理數量修改區域 
 
     if not res.data:
         print("☕ [偵查] 目前資料庫暫無待摘要物資 (Sum.-pre)，哨所待命。")
