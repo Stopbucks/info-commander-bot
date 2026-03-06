@@ -167,12 +167,25 @@ def trigger():
     return f"📡 {CONFIG['WORKER_ID']} Fortress: Mission Triggered.", 202
 
 @app.route('/')
-def health(): return f"Fortress {CONFIG['WORKER_ID']} v2.9.1 (Safety Lock Active) Online", 200
+def health(): 
+    # 🚀 正確的印表位置：是在函數內部
+    print("🔔 [RENDER 安檢] 收到健康檢查請求！")
+    return f"Fortress {CONFIG['WORKER_ID']} v2.9.1 (Safety Lock Active) Online", 200
 
+# 🛡️ 修正排程啟動邏輯
 scheduler = BackgroundScheduler()
-scheduler.add_job(func=run_integrated_mission, trigger="interval", hours=CONFIG["INTERVAL_HOURS"])
+# 計算 5 分鐘後的啟動時間
+run_start = datetime.now() + timedelta(minutes=5)
+# 🚀 必須傳入 next_run_time 才會生效
+scheduler.add_job(
+    func=run_integrated_mission, 
+    trigger="interval", 
+    hours=CONFIG["INTERVAL_HOURS"],
+    next_run_time=run_start
+)
 scheduler.start()
 
 if __name__ == "__main__":
+    # RENDER 免費版務必確保 port 抓取環境變數
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
