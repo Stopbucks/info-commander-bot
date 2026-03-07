@@ -1,7 +1,8 @@
 
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_officer.py v10  
+# 本程式碼：src/pod_scra_officer.py v10.1  (GITHUB 專用)
 # 任務：1. 偵查 2新+1舊 2. 失敗日誌回填(JSONB) 3. RSS 優先 4. 戰場清理
+# 修改： 調整偵查後不等待，直接下載。 偵測回報 FLY 可用
 # ---------------------------------------------------------
 import os, requests, time, re, json, random, feedparser
 from urllib.parse import urlparse 
@@ -46,6 +47,43 @@ def log_recon_failure(sb, task_id, provider, program_name, error_msg):
     except Exception as e:
         print(f"⚠️ [日誌紀錄失敗]: {e}")
 
+def probe_audio_metadata(url):
+    """🚀 極輕量探針：獲取音檔規格並執行海關初步裁決"""
+    meta = {"size_mb": None, "ext": None, "skip_reason": None}
+    try:
+        # 1. 執行 HEAD 探測 (限時 2 秒，跟隨轉址)
+        with requests.head(url, allow_redirects=True, timeout=2) as r:
+            if r.status_code == 200:
+                # 抓取體積
+                cl = r.headers.get('Content-Length')
+                if cl and cl.isdigit():
+                    meta["size_mb"] = round(int(cl) / (1024 * 1024), 2)
+                
+                # 抓取 Content-Type 判定副檔名
+                ct = r.headers.get('Content-Type', '').lower()
+                if 'mpeg' in ct: meta["ext"] = ".mp3"
+                elif 'm4a' in ct: meta["ext"] = ".m4a"
+                elif 'ogg' in ct: meta["ext"] = ".ogg"
+                elif 'opus' in ct: meta["ext"] = ".opus"
+        
+        # 2. 如果標頭沒給副檔名，從 URL 盲測
+        if not meta["ext"]:
+            path = urlparse(url).path
+            meta["ext"] = os.path.splitext(path)[1].lower() or ".mp3"
+
+        # 🚀 3. 執行「海關裁決」: 256MB 防爆破機制
+        s, e = meta["size_mb"], meta["ext"]
+        if s:
+            if s > 25:
+                meta["skip_reason"] = f"Oversize: {s}MB (Limit 25MB)"
+            elif e in [".ogg", ".opus"] and s > 12:
+                meta["skip_reason"] = f"Oversize: {s}MB {e} (Limit 12MB)"
+            
+    except Exception as e:
+        print(f"📡 [探針失效] 無法預測物資規格: {e}")
+    return meta
+
+
 def run_scra_officer():
     conf = STRATEGY_MAP.get(ACTIVE_STRATEGY)
     provider, persona_label, api_key = conf["provider"], conf["label"], get_secret(conf["key_name"])
@@ -55,41 +93,58 @@ def run_scra_officer():
     
     print(f"🚀 [解碼官 v9.2] 啟動黑盒子監測掃描...")
 
-    # === ⚡ 任務一：全量 RSS 偵察 (智慧延時計算) ===
+    # === ⚡ 任務一：全量 RSS 偵察 (海關預檢 + 立即領料版) ===
     print("📡 [情報站] 正在進行全量節目巡邏...")
     sources = sb.table("mission_program_master").select("*").eq("is_active", True).execute().data
+    
     for s in sources:
         try:
             feed = feedparser.parse(s["rss_feed_url"])
             if feed.entries:
                 entry = feed.entries[0]
                 audio_url = next((e.href for e in entry.enclosures if e.type.startswith("audio")), None)
+                
                 if audio_url:
+                    # 檢查是否重複
                     exists = sb.table("mission_queue").select("id").eq("audio_url", audio_url).execute()
+                    
                     if not exists.data:
-                        freq = float(s.get("update_frequency_days") or 1)
-                        delay_days = (freq * 1.5) + 2
-                        fire_time = now + timedelta(days=delay_days)
-                        sb.table("mission_queue").insert({
+                        print(f"🔎 發現新物資: {s['program_name']}，執行海關核驗...")
+                        
+                        # 🚀 啟動探針與裁決
+                        meta = probe_audio_metadata(audio_url)
+                        
+                        # 建立入庫資料包
+                        payload = {
                             "source_name": s["program_name"],
                             "audio_url": audio_url,
                             "episode_title": entry.title[:100],
                             "podbay_slug": s["podbay_slug"],
-                            "scrape_status": "pending",
-                            "assigned_troop": "T2",  # 🚀 必須明確標註，否則 v2.5 主將領不到
-                            "troop2_start_at": fire_time.isoformat()
-                        }).execute()
-                        print(f"✅ 發現新集數: {s['program_name']}")
+                            "scrape_status": "success",     # 🟢 RSS 發現即成功
+                            "used_provider": "RSS_STRIKE",
+                            "assigned_troop": "T2",         # 🟢 標註為 T2 主將用
+                            "troop2_start_at": now_iso,     # 🟢 立即開放
+                            "audio_size_mb": meta["size_mb"],
+                            "audio_ext": meta["ext"],
+                            "skip_reason": meta["skip_reason"] # 🚩 如果太重會直接在這裡標記
+                        }
+                        
+                        sb.table("mission_queue").insert(payload).execute()
+                        status_msg = f"✅ 已發送物流" if not meta["skip_reason"] else f"🛑 海關攔截 ({meta['skip_reason']})"
+                        print(f"{status_msg}: {s['program_name']}")
+
+            # 更新 master 簽到
             sb.table("mission_program_master").update({"last_checked_at": now_iso}).eq("podbay_slug", s["podbay_slug"]).execute()
+            
         except Exception as e:
             print(f"⚠️ 偵察 {s['program_name']} 時遇到干擾: {e}")
 
-    # === ⚡ 任務二：補漏偵察 (HTML 攻堅並紀錄失敗) ===
+    # === ⚡ 任務二：補漏偵察 (HTML 攻堅並紀錄失敗) 新(6)+舊(2)偵察任務調整區塊===
     print(f"\n🔦 [攻堅模組] 兵種: {persona_label} | 開始處理到期任務...")
     new_m = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "pending").lte("troop2_start_at", now_iso)\
-            .order("created_at", desc=True).limit(2).execute()
+            .order("created_at", desc=True).limit(6).execute()
     old_m = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "pending").lte("troop2_start_at", now_iso)\
-            .order("created_at", desc=False).limit(1).execute()
+            .order("created_at", desc=False).limit(2).execute()
     all_missions = (new_m.data or []) + (old_m.data or [])
 
     for m in all_missions:
@@ -147,10 +202,18 @@ def run_scra_officer():
 
                     # 🏁 最終產出判定
                     if f_audio:
-                        # 成功捕獲音檔
-                        upd.update({"audio_url": f_audio, "scrape_status": "success", "used_provider": f"{provider}_FISHER"})
+                        meta = probe_audio_metadata(f_audio) # 🚀 同樣執行探針
+                        upd.update({
+                            "audio_url": f_audio, 
+                            "scrape_status": "success", 
+                            "used_provider": f"{provider}_FISHER",
+                            "audio_size_mb": meta["size_mb"], # 📊 預填體積
+                            "audio_ext": meta["ext"],          # 📊 預填副檔名
+                            "skip_reason": meta["skip_reason"] # 🚩 預填攔截原因
+                        })
                         sb.table("mission_queue").update(upd).eq("id", task_id).execute()
-                        print(f"✅ [結案] HTML 偵察完畢並更新。")
+                        print(f"✅ [結案] HTML 偵察完畢。規格: {meta['size_mb']}MB")  
+                        
                     else:
                         # 成功進站但沒找到連結 (屬於資料落空，寫入黑盒子)
                         log_recon_failure(sb, task_id, provider, source_name, "AUDIO_NOT_FOUND_ON_PAGE")
