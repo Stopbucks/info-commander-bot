@@ -13,9 +13,10 @@ from urllib.parse import urlparse
 app = Flask(__name__)
 
 # === 🎖️ 情報控制面板 ===
+
 # 已修正 FLY_LAX 重複問題並確保各組名單正確
-INTEL_AUDIO_OFFICERS = ["ZEABUR", "FLY_LAX", "RENDER", "HUGGINGFACE"] 
-INTEL_TXT_OFFICERS = ["ZEABUR", "KOYEB", "RENDER", "HUGGINGFACE", "FLY_LAX"]
+INTEL_AUDIO_OFFICERS = ["FLY_LAX", "RENDER", "HUGGINGFACE"] 
+INTEL_TXT_OFFICERS = ["FLY_LAX", "KOYEB", "RENDER", "HUGGINGFACE"]
 
 CONFIG = {
     "WORKER_ID": os.environ.get("WORKER_ID", "UNKNOWN_NODE"),
