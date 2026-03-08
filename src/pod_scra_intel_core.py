@@ -1,12 +1,13 @@
 
 
 # ---------------------------------------------------------
-# src/pod_scra_intel_core.py v2 (2026 容錯強化)
+# src/pod_scra_intel_core.py v2.1  (卸除boto3)
 # 任務：1. 階梯式任務發動 2. 記憶體強制回收 3. API 重試邏輯
 # ---------------------------------------------------------
 import os, requests, json, time, random, base64, re, gc
 from datetime import datetime, timezone
 from supabase import create_client
+from src.pod_scra_intel_trans import compress_task_to_opus
 
 def get_secrets():
     return {
@@ -41,24 +42,32 @@ def parse_intel_metrics(text):
 # 🎤 第一棒：Audio to STT (產線調度官 - 偵查碼加強版)
 # =========================================================
 def run_audio_to_stt_mission():
-    time.sleep(random.uniform(3.0, 8.0))
+    """🧠 情報官大腦：只負責決策與 AI 調度"""
     sb = get_sb(); s = get_secrets()
+    worker_id = os.environ.get("WORKER_ID", "UNKNOWN")
+    mem_tier = int(os.environ.get("MEMORY_TIER", 256)) 
     
-    res = sb.table("mission_queue").select("id, r2_url, episode_title")\
-            .eq("scrape_status", "completed").order("created_at", desc=True).limit(3).execute()
-    
+    # 領料判定 (大件優先/分流)
+    sort_desc = (mem_tier >= 512)
+    res = sb.table("mission_queue").select("*")\
+            .eq("scrape_status", "completed").is_("skip_reason", "null")\
+            .order("audio_size_mb", desc=sort_desc).limit(2 if sort_desc else 1).execute()
+
     for task in (res.data or []):
-        task_id = task['id']
-        check = sb.table("mission_intel").select("id").eq("task_id", task_id).execute()
-        if check.data: continue
-
-        chosen_provider = random.choice(["GROQ", "GEMINI"])
-        print(f"🎲 [第一棒偵查] 任務 {task_id[:8]} 分流至 -> [{chosen_provider}]")
+        r2_url = task.get('r2_url', '').lower()
         
-        sb.table("mission_intel").insert({
-            "task_id": task_id, "intel_status": "Sum.-proc", "ai_provider": chosen_provider
-        }).execute()
+        # --- 決策分歧點 ---
+        if mem_tier >= 512 and r2_url.endswith('.mp3'):
+            # 🚀 呼叫運輸官執行壓縮任務
+            print(f"📡 [情報官] 下令物流站進行物資壓縮: {task['id'][:8]}")
+            success, new_url = compress_task_to_opus(task['id'], task['r2_url'])
+            if success:
+                sb.table("mission_queue").update({
+                    "r2_url": new_url, "audio_ext": ".opus", "used_provider": f"{worker_id}_L-OPT"
+                }).eq("id", task['id']).execute()
+            continue 
 
+        # --- 正常 AI 轉譯流程 ---
         try:
             if chosen_provider == "GROQ":
                 audio_url = f"{s['R2_URL']}/{task['r2_url']}"
@@ -215,4 +224,3 @@ def run_stt_to_summary_mission():
             import traceback
             print(traceback.format_exc()) # 噴出完整錯誤堆疊以便定位
 
-# 修改於0305

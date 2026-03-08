@@ -1,32 +1,36 @@
 # ---------------------------------------------------------
-# S-Plan Fortress v2.9.1 (2026 鋼鐵加固合併版)
-# 任務：1. 心跳 2. AI 接力 3. 役期交接 4. 重型物流 5. 403 自動換班
-# 修正：1. 加入 FLY_LAX 2. 修正階段 5 縮排錯誤 3. 強化 256MB 內存鎖定 4. 動態副檔名偵測
+# S-Plan Fortress v4.1   (2026 RENDER + KOYEB；512MB 記憶體)
+# 任務：1. 接口防震 2. 指令下達 3. 排程管理 4. 線程安全鎖
+# 核心：本檔案僅負責「流程調控」，具體「物流/AI」由 src/ 模組執行
 # ---------------------------------------------------------
-import os, time, json, requests, boto3, re, random, feedparser, threading, traceback, gc
+import os, time, json, requests, random, threading, traceback, gc
 from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify, request
 from supabase import create_client
 from apscheduler.schedulers.background import BackgroundScheduler
-from urllib.parse import urlparse 
+
+# 🚀 核心模組導入 (分割後的邏輯)
+from src.pod_scra_intel_trans import execute_fortress_stages 
 
 app = Flask(__name__)
 
-# === 🎖️ 情報控制面板 ===
-
-# 已修正 FLY_LAX 重複問題並確保各組名單正確
-INTEL_AUDIO_OFFICERS = ["FLY_LAX", "RENDER", "HUGGINGFACE"] 
-INTEL_TXT_OFFICERS = ["FLY_LAX", "KOYEB", "RENDER", "HUGGINGFACE"]
+# === 🎖️ 指揮部配置 ===
+# 任務編組：定義哪些節點需要執行轉譯或摘要
+INTEL_AUDIO_OFFICERS = ["FLY_LAX", "RENDER", "HUGGINGFACE", "KOYEB"] 
+INTEL_TXT_OFFICERS =   ["FLY_LAX", "RENDER", "HUGGINGFACE", "KOYEB"]
 
 CONFIG = {
     "WORKER_ID": os.environ.get("WORKER_ID", "UNKNOWN_NODE"),
     "INTERVAL_HOURS": 2,
-    "NEW_LIMIT": 2, "OLD_LIMIT": 1,
-    "JITTER_BASE_MIN": 180, "JITTER_BASE_MAX": 360,
-    "CRON_SECRET": os.environ.get("CRON_SECRET")
+    "CRON_SECRET": os.environ.get("CRON_SECRET"),
+    "JITTER_BASE_MIN": 180, "JITTER_BASE_MAX": 360, # 隨機抖動區間 (秒)
+    "RETRY_TOTAL": 2
 }
 
+# --- 🛠️ 指揮部輔助工具 ---
+
 def s_log(sb, task_type, status, message, err_stack=None):
+    """標準化戰情紀錄"""
     try:
         print(f"[{task_type}][{status}] {message}")
         if status in ["SUCCESS", "ERROR"] or "啟動" in message:
@@ -36,162 +40,126 @@ def s_log(sb, task_type, status, message, err_stack=None):
             }).execute()
     except: pass
 
-def get_sb(): return create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
+def get_sb(): 
+    """獲取資料庫連線"""
+    return create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
+
 def get_s3():
+    """獲取 R2 倉庫連線 (交由 trans 模組呼叫)"""
+    import boto3 # 延遲載入以節省啟動內存
     return boto3.client('s3', endpoint_url=os.environ.get("R2_ENDPOINT_URL"),
                         aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID"),
                         aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY"), region_name="auto")
 
-# 🛡️ 任務鎖定標籤：防止 256MB 內存被多執行緒併發爆破 (v2.9 核心防護)
+# 🛡️ 戰術防護鎖：防止 256MB/512MB 被併發請求衝垮
 MISSION_LOCK = threading.Lock()
 IS_RUNNING = False
 
-# === 🛡️ 任務調度器 (序列化 + GC 資源回收版) ===
+# --- 🛰️ AI 情報工廠線 (裝甲強化版) ---
+
 def trigger_intel_pipeline(sb):
+    """呼叫 AI 加工中心執行轉譯與摘要"""
     worker = CONFIG["WORKER_ID"]
     try:
-        # 1. 先跑音訊組任務
-        if worker in INTEL_AUDIO_OFFICERS:
-            from src.pod_scra_intel_core import run_audio_to_stt_mission
-            s_log(sb, "AI", "INFO", f"🎤 [音訊組] {worker} 啟動轉譯")
-            run_audio_to_stt_mission() # 🚀 直接執行
+        gc.collect() # 啟動前清理
+        
+        # 1. 音訊轉譯接力
+        if worker in INTEL_AUDIO_OFFICERS: 
+            from src.pod_scra_intel_core import run_audio_to_stt_mission 
+            s_log(sb, "AI", "INFO", f"🎤 [音訊組] {worker} 啟動轉譯流水線")
+            run_audio_to_stt_mission() 
             gc.collect()
+        
+        # 給系統 30 秒冷卻，讓內存寫入 Swap 或完全釋放
+        time.sleep(30) 
 
-        # 給系統喘息時間，防止資料庫連線過載
-        time.sleep(random.randint(15, 30))
-
-        # 2. 接著跑文字組任務
-        if worker in INTEL_TXT_OFFICERS:
+        # 2. 文字摘要接力
+        if worker in INTEL_TXT_OFFICERS: 
             from src.pod_scra_intel_core import run_stt_to_summary_mission
-            s_log(sb, "AI", "INFO", f"✍️ [文字組] {worker} 啟動摘要")
-            run_stt_to_summary_mission() # 🚀 直接執行
+            s_log(sb, "AI", "INFO", f"✍️ [文字組] {worker} 啟動摘要加工")
+            run_stt_to_summary_mission() 
             gc.collect()
             
     except Exception as e:
-        print(f"⚠️ [AI序列異常]: {e}"); gc.collect()
+        print(f"⚠️ [AI流水線異常]: {e}")
+        gc.collect()
 
+# --- 🚛 綜合巡邏任務 (總引擎加固版) ---
 def run_integrated_mission():
+    """本函式作為『發令官』，強化了內存與連線回收機制"""
     global IS_RUNNING
-    if IS_RUNNING: return
+    if MISSION_LOCK.locked(): 
+        return
+
     with MISSION_LOCK:
-        IS_RUNNING = True
-        sb = get_sb(); now = datetime.now(timezone.utc); now_iso = now.isoformat()
-        
+        IS_RUNNING = True 
+        sb = None
         try:
-            # --- 階段 1：心跳蓋章 ---
-            t_res = sb.table("pod_scra_tactics").select("*").eq("id", 1).single().execute()
-            if not t_res.data: return
-            tactic = t_res.data
-            
-            health = tactic.get('workers_health', {}) or {}
-            health[CONFIG['WORKER_ID']] = now_iso
-            sb.table("pod_scra_tactics").update({"last_heartbeat_at": now_iso, "workers_health": health}).eq("id", 1).execute()
-
-            # --- 🚀 階段 2：同步黑名單 (這是您漏掉的關鍵！) ---
-            rule_res = sb.table("pod_scra_rules").select("domain").eq("worker_id", CONFIG["WORKER_ID"]).execute()
-            my_blacklist = [r['domain'] for r in rule_res.data] if rule_res.data else []
-            s_log(sb, "HEARTBEAT", "SUCCESS", f"💓 {CONFIG['WORKER_ID']} 心跳成功 (黑名單數: {len(my_blacklist)})")
-
-            # --- 🚀 階段 3：序列化執行 AI 任務 ---
-            trigger_intel_pipeline(sb)
-
-            # --- 階段 4：身分判定 ---
-            if tactic['active_worker'] != CONFIG['WORKER_ID']:
-                print(f"🛌 [待命] 目前由 {tactic['active_worker']} 值勤，非主將身分，結束巡邏。")
-                return
-
-            # --- 階段 5：重型物流 (遇錯即休模式) ---
-            print("🚛 [物流開火] 準備提取 T2 物資...")
-            query = sb.table("mission_queue").select("*, mission_program_master(*)")\
-                      .eq("scrape_status", "success").eq("assigned_troop", "T2")\
-                      .lte("troop2_start_at", now_iso)
-
-            tasks = (query.order("created_at", desc=True).limit(CONFIG['NEW_LIMIT']).execute().data or []) + \
-                    (query.order("created_at", desc=False).limit(CONFIG['OLD_LIMIT']).execute().data or [])
-            
-            if not tasks:
-                print("☕ 戰區暫無待處理物資。")
-            else:
-                s3 = get_s3(); bucket = os.environ.get("R2_BUCKET_NAME")
-                for idx, m in enumerate(tasks):
-                    f_url = m.get('audio_url')
-                    if not f_url: continue
-                    target_domain = urlparse(f_url).netloc
-                    if any(b_domain in target_domain for b_domain in my_blacklist):
-                        print(f"⏩ [ROE規避] {target_domain}處於禁閉期，跳過。")
-                        continue
-
-                    # 動態偵測副檔名並建立暫存路徑
-                    ext = os.path.splitext(urlparse(f_url).path)[1] or ".mp3"
-                    tmp_path = f"/tmp/{now.strftime('%Y%m%d')}_{m['id'][:8]}{ext}"
-                    
-                    try:
-                        with requests.get(f_url, stream=True, timeout=120) as r:
-                            r.raise_for_status()
-                            with open(tmp_path, 'wb') as f:
-                                for chunk in r.iter_content(chunk_size=16384): f.write(chunk)
-                        
-                        file_name = os.path.basename(tmp_path)
-                        s3.upload_file(tmp_path, bucket, file_name)
-                        sb.table("mission_queue").update({"scrape_status": "completed", "r2_url": file_name}).eq("id", m['id']).execute()
-                        s_log(sb, "DOWNLOAD", "SUCCESS", f"✅ 物資入庫: {file_name}")
-                    
-                    except requests.exceptions.HTTPError as he:
-                        if he.response.status_code == 403:
-                            # 🚀 紀律調整：不自作主張換班，僅寫入報警，交給 Vercel 裁決
-                            target_domain = urlparse(f_url).netloc
-                            s_log(sb, "SYSTEM", "ERROR", f"🚫 403 封鎖！{target_domain}，等待裁決")
-                            sb.table("pod_scra_tactics").update({
-                                "last_error_type": f"403_BANNED_{target_domain}"
-                            }).eq("id", 1).execute()
-                            return # 立即停止，進入休息狀態
-                    
-                    except Exception as e:
-                        s_log(sb, "DOWNLOAD", "ERROR", f"❌ 搬運失敗: {str(e)}")
-                    
-                    finally:
-                        if os.path.exists(tmp_path): 
-                            try: os.remove(tmp_path)
-                            except: pass
-                        gc.collect() # 任務間強制回收記憶體
-                    
-                    if idx < len(tasks) - 1: 
-                        time.sleep(random.randint(CONFIG['JITTER_BASE_MIN'], CONFIG['JITTER_BASE_MAX']))
-
+            sb = get_sb()
+            # 🚀 序列化指令下達：嚴格按照 1.簽到 2.AI加工 3.物流 的順序
+            execute_fortress_stages(
+                sb=sb,
+                config=CONFIG,
+                s_log_func=s_log,
+                trigger_intel_func=trigger_intel_pipeline,
+                get_s3_func=get_s3,
+                officers_list=INTEL_AUDIO_OFFICERS
+            )
         except Exception as e:
-            s_log(sb, "SYSTEM", "ERROR", f"💥 系統崩潰: {str(e)}", traceback.format_exc())
+            print(f"💥 戰場大崩潰: {e}")
+            traceback.print_exc()
         finally:
+            # 🚀 鋼鐵防線：強制銷毀對象與回收內存
+            if sb: del sb
             IS_RUNNING = False
             gc.collect()
+            print("🏁 [巡邏結束] 指揮中心已釋放所有資源並重置 READY。")
 
-# --- 📡 接口與排程設定 ---
-@app.route('/ping')
-def trigger():
-    token = request.args.get('token')
-    if not token or token != CONFIG['CRON_SECRET']: return "Unauthorized", 401
-    threading.Thread(target=run_integrated_mission, daemon=True).start()
-    return f"📡 {CONFIG['WORKER_ID']} Fortress: Mission Triggered.", 202
+# --- 📡 接口與排程 ( 512MB 裝甲通用版) ---
 
 @app.route('/')
 def health(): 
-    # 🚀 正確的印表位置：是在函數內部
-    print("🔔 [RENDER 安檢] 收到健康檢查請求！")
-    return f"Fortress {CONFIG['WORKER_ID']} v2.9.1 (Safety Lock Active) Online", 200
+    # 🚀 輕量化安檢：降低 LOG 堆積壓力
+    print(f"🔔 [{CONFIG['WORKER_ID']} 安檢] 收到巡檢請求，系統正常。")
+    return f"Fortress {CONFIG['WORKER_ID']} v4.1 (Active Defense) Online", 200
 
-# 🛡️ 修正排程啟動邏輯
+
+@app.route('/ping')
+def trigger():
+    global IS_RUNNING
+    # 🚀 1：第一道門防衛 (優先權限核驗，減少無效開銷)
+    token = request.args.get('token')
+    if not token or token != CONFIG['CRON_SECRET']:
+        return "Unauthorized", 401
+    
+    # 🚀 2：第二道門防衛 (瞬發 Busy Check，不進入 sleep)
+    if IS_RUNNING or MISSION_LOCK.locked():
+        return "Too Many Requests - Mission in Progress", 429
+
+    # 🚀 3：避震抖動 (僅對獲准者執行延遲)
+    time.sleep(random.uniform(3.0, 8.0))
+
+    # 🚀 4：雙重確認 (Double-Check)，確保延遲期間無併發任務
+    if IS_RUNNING or MISSION_LOCK.locked():
+        return "Locked", 429
+
+    # 🚀 5： 點火執行
+    threading.Thread(target=run_integrated_mission, daemon=True).start()
+    return f"Mission Triggered", 202
+
+# 🕒 排程啟動系統 (修正啟動邏輯)
 scheduler = BackgroundScheduler()
-# 計算 5 分鐘後的啟動時間
-run_start = datetime.now() + timedelta(minutes=5)
-# 🚀 必須傳入 next_run_time 才會生效
+# 🚀 延遲 5 分鐘後啟動首次自動巡邏，避開部署初期的資源尖峰
+run_next = datetime.now() + timedelta(minutes=5)
 scheduler.add_job(
     func=run_integrated_mission, 
     trigger="interval", 
     hours=CONFIG["INTERVAL_HOURS"],
-    next_run_time=run_start
+    next_run_time=run_next
 )
 scheduler.start()
 
 if __name__ == "__main__":
-    # RENDER 免費版務必確保 port 抓取環境變數
-    port = int(os.environ.get('PORT', 10000))
+    # 🚀 自動偵測雲端環境 Port (Render 預設 10000, Koyeb 預設 8080)
+    port = int(os.environ.get('PORT', 10000)) 
     app.run(host='0.0.0.0', port=port)
