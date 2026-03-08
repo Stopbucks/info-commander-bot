@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# S-Plan Fortress v4.1   (2026 RENDER + KOYEB；512MB 記憶體)
+# S-Plan Fortress v4.2   (2026 RENDER + KOYEB；512MB 記憶體)
 # 任務：1. 接口防震 2. 指令下達 3. 排程管理 4. 線程安全鎖
 # 核心：本檔案僅負責「流程調控」，具體「物流/AI」由 src/ 模組執行
 # ---------------------------------------------------------
@@ -119,9 +119,9 @@ def run_integrated_mission():
 
 @app.route('/')
 def health(): 
-    # 🚀 輕量化安檢：降低 LOG 堆積壓力
-    print(f"🔔 [{CONFIG['WORKER_ID']} 安檢] 收到巡檢請求，系統正常。")
-    return f"Fortress {CONFIG['WORKER_ID']} v4.1 (Active Defense) Online", 200
+    # 🚀 修正：移除 print，避免 RENDER 的健康檢查爆擊佔用 log 緩衝區
+    # 只保留極輕量的回傳
+    return "OK", 200
 
 
 @app.route('/ping')
