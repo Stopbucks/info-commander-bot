@@ -1,11 +1,12 @@
 # ---------------------------------------------------------
-# 程式碼：src/pod_scra_intel_trans.py  (S-Plan Fortress v4.3)
+# 程式碼：src/pod_scra_intel_trans.py  (S-Plan Fortress v4.4)
 # 任務：專職物流引擎、 ffmpeg 壓縮 ； boto3 - R2底層溝通
 # 適用： RENDER & KOYEB (512 MB)
-# 修改：從app.py 獨立，物流邏輯封裝
+# 修改：從app.py 獨立，物流邏輯封裝 、ffmpeg適用
 # ---------------------------------------------------------
 
 import os, requests, time, random, gc, subprocess, boto3
+import imageio_ffmpeg   # 🚀 引入自帶的 ffmpeg 兵器庫
 from urllib.parse import urlparse
 from datetime import datetime, timezone, timedelta
 
@@ -29,15 +30,25 @@ def download_from_r2(filename, local_path):
             for chunk in r.iter_content(chunk_size=1024*1024): f.write(chunk)
 
 def compress_task_to_opus(task_id, raw_filename):
-    """🛠️ 鋼鐵改裝：將 MP3 轉為 AI 專用極輕量 Opus"""
-    tmp_in, tmp_out = f"/tmp/in_{task_id[:8]}.mp3", f"/tmp/out_{task_id[:8]}.opus"
+    """🛠️ 鋼鐵改裝：將 MP3/M4A 轉為 AI 專用極輕量 Opus (自帶引擎版)"""
+    
+    # 🚀 1. 動態抓取副檔名，如果沒寫預設當作 .mp3，確保 m4a 也能正確解碼
+    ext = os.path.splitext(raw_filename)[1].lower() or '.mp3'
+    tmp_in = f"/tmp/in_{task_id[:8]}{ext}"
+    tmp_out = f"/tmp/out_{task_id[:8]}.opus"
     new_name = f"opt_{task_id[:8]}.opus"
+    
     try:
         download_from_r2(raw_filename, tmp_in)
-        # 🚀 鋼鐵指令：Mono, 16k, libopus, 16kbps
-        cmd = ['ffmpeg', '-y', '-i', tmp_in, '-ar', '16000', '-ac', '1', 
+        
+        # 🚀 2. 獲取 imageio-ffmpeg 隱藏在套件內的實體執行檔路徑
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        
+        # 🚀 3. 使用實體路徑取代單純的 'ffmpeg' 字串
+        cmd = [ffmpeg_exe, '-y', '-i', tmp_in, '-ar', '16000', '-ac', '1', 
                '-c:a', 'libopus', '-b:a', '16k', '-vbr', 'off', 
                '-compression_level', '0', '-preset', 'superfast', tmp_out]
+               
         subprocess.run(cmd, check=True, capture_output=True)
         upload_to_r2(tmp_out, new_name)
         return True, new_name
@@ -47,6 +58,7 @@ def compress_task_to_opus(task_id, raw_filename):
         for f in [tmp_in, tmp_out]:
             if os.path.exists(f): os.remove(f)
         gc.collect()
+
 
 def execute_fortress_stages(sb, config, s_log_func, trigger_intel_func, get_s3_func, officers_list):
     """🚛 執行全階段物流巡邏"""

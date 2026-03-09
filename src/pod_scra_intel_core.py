@@ -1,8 +1,8 @@
 
 # ---------------------------------------------------------
-# src/pod_scra_intel_core.py v4.3 (2026 三位一體-情報加工官)
+# src/pod_scra_intel_core.py v4.4 (2026 三位一體-情報加工官)
 # 任務：1. 分流決策 2. STT 轉譯 3. 情報摘要 4. GEMINI 2.5
-# 修正：MIME 動態適配、解決 NameError、強化變數定義
+# 修正：MIME 動態適配、解決 NameError、強化變數定義 、ffmpeg適用
 # ---------------------------------------------------------
 
 import os, requests, json, time, random, base64, re, gc
@@ -41,16 +41,18 @@ def run_audio_to_stt_mission(sb):
         task_id = task['id']; r2_url = task.get('r2_url', '').lower()
         try:
             # --- 🛠️ 階段 A：512MB 窄化壓縮 ---
-            if mem_tier >= 512 and r2_url.endswith('.mp3'):
+            # 🚀 修正：同時攔截 mp3 與 m4a 交給 512MB 節點處理
+            if mem_tier >= 512 and (r2_url.endswith('.mp3') or r2_url.endswith('.m4a')):
                 success, new_url = compress_task_to_opus(task_id, task['r2_url'])
                 if success:
                     sb.table("mission_queue").update({"r2_url": new_url, "audio_ext": ".opus"}).eq("id", task_id).execute()
                 continue 
 
             # --- 🛠️ 階段 B：AI 轉譯分流 ---
-            if mem_tier < 512 and r2_url.endswith('.mp3'): continue 
-            check = sb.table("mission_intel").select("id").eq("task_id", task_id).execute()
-            if check.data: continue 
+            # 🚀 修正：256MB 的小節點，遇到 mp3 與 m4a 一律迴避，避免 OOM 崩潰
+            if mem_tier < 512 and (r2_url.endswith('.mp3') or r2_url.endswith('.m4a')): 
+                continue
+
 
             chosen_provider = random.choice(["GROQ", "GEMINI"])
             sb.table("mission_intel").insert({"task_id": task_id, "intel_status": "Sum.-proc", "ai_provider": chosen_provider}).execute()
