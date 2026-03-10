@@ -1,18 +1,18 @@
 ##########################################################################
-# 🪖 PODCAST GUERRILLA G-SQUAD (游擊部隊自動化：Opus + Groq 版)
+# 🪖 PODCAST GUERRILLA G-SQUAD (T1 特戰物流：Opus 壓縮 + R2 倉儲版)
 ##########################################################################
 # 1. 指揮權限：由 GitHub Actions 內部 Schedule 觸發。
-# 2. 出勤週期：台北時間 週一、三、五、日 凌晨 03:00 (UTC 19:00)。
-# 3. 核心特徵：獨立 Proxy 出口、Opus 極限壓縮、Groq 極速摘要。
+# 2. 出勤週期：台北時間 每日 凌晨 03:00 (UTC 19:00)。(由 Python 決定實戰或溫養)
+# 3. 核心特徵：獨立 Proxy 出口、Opus 極限壓縮、上傳 R2 交接 T2。
 ##########################################################################
 
 name: Podcast Guerrilla Squad Sync
 
 on:
   schedule:
-    # 🚀 台北 03:00 (一、三、五、日) = UTC 19:00 (日、二、四、六)
-    # Cron 索引：0=Sun, 2=Tue, 4=Thu, 6=Sat
-    - cron: '0 19 * * 0,2,4,6'
+    # 🚀 台北 03:00 (每日) = UTC 19:00 (每日)
+    # 💡 讓 Python 內部的 weekday 邏輯去決定今天要實戰還是溫養
+    - cron: '0 19 * * *'
   
   # 🛠️ 支援手動從 Actions 介面點擊觸發
   workflow_dispatch:
@@ -24,16 +24,21 @@ jobs:
 
     env:
       PYTHONUNBUFFERED: 1
-      # 🔐 [游擊隊專屬] 代理與 AI 密鑰
+      # 🔐 [游擊隊專屬] 代理密鑰
       WEBSHARE_LIST: ${{ secrets.WEBSHARE_LIST }}
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }} # 🚀 新增
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}     # 🚀 新增
+      # 🚀 [新增] R2 兵工廠密鑰 (交接給 T2 必備)
+      R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }} 
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}     
+      
       # 🔐 [基礎設施] 共享資料庫與 Webhook
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       RENDER_WEBHOOK_URL: ${{ secrets.RENDER_WEBHOOK_URL }}
       GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
 
@@ -52,8 +57,9 @@ jobs:
           # 🚀 關鍵：安裝 libopus-dev 以支援 16k Mono Opus 轉碼
           sudo apt-get update && sudo apt-get install -y ffmpeg libopus-dev
           python -m pip install --upgrade pip
-          # 安裝包含 Groq 與 Supabase 在內的必要套件
-          pip install "curl_cffi>=0.7.0" "requests[socks]" feedparser google-generativeai groq PySocks python-dotenv supabase google-cloud-storage
+          # 🚀 [修正] 移除 groq，新增 boto3 支援 R2 上傳
+          pip install "curl_cffi>=0.7.0" "requests[socks]" feedparser PySocks python-dotenv supabase google-cloud-storage boto3
+      
       - name: ⚔️ [突擊] 啟動 g-小隊領命任務
         run: |
           echo "📅 系統啟動時間 (UTC): $(date -u)"
@@ -63,4 +69,4 @@ jobs:
         if: always()
         run: |
           rm -f *.mp3 *.opus
-          echo "🏁 游擊現場清理完畢，數據已回填雲端。"
+          echo "🏁 游擊現場清理完畢，戰利品已移交 R2 雲端。"
