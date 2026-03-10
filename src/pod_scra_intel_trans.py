@@ -37,8 +37,8 @@ def execute_fortress_stages(sb, config, s_log_func, trigger_intel_func, officers
             rule_res = sb.table("pod_scra_rules").select("domain").in_("worker_id", [worker_id, "ALL"]).gte("expired_at", now_iso).execute()
             my_blacklist = [r['domain'] for r in rule_res.data] if rule_res.data else []
             
-            run_logistics_engine(sb, config, now_iso, get_s3_func, s_log_func, my_blacklist)
-            
+            run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist)
+
     except Exception as e:
         s_log_func(sb, "SYSTEM", "ERROR", f"💥 運輸異常: {str(e)}")
 

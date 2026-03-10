@@ -7,7 +7,7 @@
 
 import os, requests, json, time, random, base64, re, gc
 from datetime import datetime, timezone
-from src.pod_scra_r2 import compress_task_to_opus
+from src.pod_scra_intel_r2 import compress_task_to_opus
 
 def get_secrets():
     """集中管理所有外部金鑰"""
