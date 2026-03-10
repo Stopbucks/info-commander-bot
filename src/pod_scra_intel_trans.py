@@ -1,8 +1,8 @@
 
 # ---------------------------------------------------------
-# 程式碼：src/pod_scra_intel_trans.py  (V4.6  S-Plan 物流防禦官)
-# 任務：執行三位一體巡邏、T2 重型物流下載、403 威脅雷達與動態冰封
-# 修改：新增冰封期間
+# 程式碼：src/pod_scra_intel_trans.py  (V4.6  S-Plan KOYEB RENDER 專用)
+# 任務：執行三位一體巡邏、T2 重型物流下載、403 威脅雷達與動態冰封 
+# 修改：新增冰封期間 
 # ---------------------------------------------------------
 
 import os, requests, time, random, gc, json
@@ -47,7 +47,8 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
     【核心物流引擎】
     負責下載音檔至本機，上傳至 R2，並具備 403 遇襲後的「威脅建檔」與「指數冰封」能力。
     """
-    query = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "success").is_("r2_url", "null").lte("troop2_start_at", now_iso).order("created_at", desc=True).limit(2)
+    query = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "success").is_("r2_url", "null").lte("troop2_start_at", now_iso).order("created_at", desc=True)\
+            .limit(1)   # 📌 每次抓取檔案數量的限制 📌
     tasks = query.execute().data or []
     if not tasks: return
     
