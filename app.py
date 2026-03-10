@@ -1,5 +1,6 @@
+
 # ---------------------------------------------------------
-# S-Plan Fortress v4.2.1   (2026 RENDER + KOYEB；512MB 記憶體)
+# S-Plan Fortress v4.2.2   (2026 RENDER + KOYEB；512MB 記憶體)
 # 任務：1. 接口防震 2. 指令下達 3. 排程管理 4. 線程安全鎖
 # 核心：本檔案僅負責「流程調控」，具體「物流/AI」由 src/ 模組執行
 # ---------------------------------------------------------
@@ -8,7 +9,8 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify, request
 from supabase import create_client
 from apscheduler.schedulers.background import BackgroundScheduler
-from src.pod_scra_intel_trans import execute_fortress_stages 
+from src.pod_scra_intel_trans import execute_fortress_stages    # 修正 ：匯入總指揮程序
+
 
 app = Flask(__name__)
 
@@ -27,12 +29,6 @@ def get_sb():
     """建立並回傳 Supabase 連線物件"""
     return create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
 
-def get_s3():
-    """建立並回傳 R2/S3 連線物件 (延遲加載以節省內存)"""
-    import boto3 
-    return boto3.client('s3', endpoint_url=os.environ.get("R2_ENDPOINT_URL"),
-                        aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID"),
-                        aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY"), region_name="auto")
 
 def s_log(sb, task_type, status, message, err_stack=None):
     """將任務狀態寫入 Supabase 紀錄表"""
@@ -54,16 +50,18 @@ def trigger_intel_pipeline(sb):
     worker = CONFIG["WORKER_ID"]
     try:
         gc.collect() 
-        # 🚀 修正：從 core 模組導入函式，並傳入 sb 避免 NameError
         from src.pod_scra_intel_core import run_audio_to_stt_mission, run_stt_to_summary_mission
         
-        s_log(sb, "AI", "INFO", f"🎤 [音訊組] {worker} 啟動轉譯流水線")
-        run_audio_to_stt_mission(sb) 
+        # 🚀 修正 2：恢復兵種核對機制
+        if worker in INTEL_AUDIO_OFFICERS:
+            s_log(sb, "AI", "INFO", f"🎤 [音訊組] {worker} 啟動轉譯流水線")
+            run_audio_to_stt_mission(sb) 
         
         time.sleep(30) # 🚀 冷卻緩衝
 
-        s_log(sb, "AI", "INFO", f"✍️ [文字組] {worker} 啟動摘要加工")
-        run_stt_to_summary_mission(sb) 
+        if worker in INTEL_TXT_OFFICERS:
+            s_log(sb, "AI", "INFO", f"✍️ [文字組] {worker} 啟動摘要加工")
+            run_stt_to_summary_mission(sb) 
             
     except Exception as e:
         print(f"⚠️ [AI流水線異常]: {e}")
@@ -80,7 +78,7 @@ def run_integrated_mission():
         try:
             sb = get_sb()
             # 🚀 三位一體聯動：呼叫 Trans 模組執行全階段邏輯
-            execute_fortress_stages(sb, CONFIG, s_log, trigger_intel_pipeline, get_s3, INTEL_AUDIO_OFFICERS)
+            execute_fortress_stages(sb, CONFIG, s_log, trigger_intel_pipeline, INTEL_AUDIO_OFFICERS)
         except Exception as e:
             print(f"💥 戰場總體崩潰: {e}")
         finally:
@@ -88,6 +86,8 @@ def run_integrated_mission():
             IS_RUNNING = False
             gc.collect()
             print("🏁 [巡邏結束] 指揮中心 READY。")
+            
+
             
 # --- 📡 接口與排程 ( 512MB 裝甲通用版) ---
 

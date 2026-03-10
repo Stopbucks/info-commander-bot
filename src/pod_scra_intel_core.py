@@ -7,7 +7,7 @@
 
 import os, requests, json, time, random, base64, re, gc
 from datetime import datetime, timezone
-from src.pod_scra_intel_trans import compress_task_to_opus
+from src.pod_scra_r2 import compress_task_to_opus
 
 def get_secrets():
     """集中管理所有外部金鑰"""
@@ -34,7 +34,7 @@ def run_audio_to_stt_mission(sb):
     """負責物資分流與轉譯啟動"""
     s = get_secrets(); worker_id = os.environ.get("WORKER_ID", "UNKNOWN"); mem_tier = int(os.environ.get("MEMORY_TIER", 256)) 
     sort_desc = (mem_tier >= 512)
-    res = sb.table("mission_queue").select("*").eq("scrape_status", "completed").is_("skip_reason", "null").order("audio_size_mb", desc=sort_desc).limit(1).execute()
+    res = sb.table("view_worker_task_inbox").select("*").order("audio_size_mb", desc=sort_desc).limit(1).execute()
 
     if not res.data: return
     for task in res.data:
@@ -82,7 +82,8 @@ def run_stt_to_summary_mission(sb):
     res = sb.table("mission_intel").select("*, mission_queue(*)").eq("intel_status", "Sum.-pre").limit(1).execute()
     if not res.data: return
     for intel in res.data:
-        task_id = intel['task_id']; provider = intel['ai_provider']
+        # 🚀 增加 q_data 安全變數，防止 KeyError 崩潰
+        task_id = intel['task_id']; provider = intel['ai_provider']; q_data = intel.get('mission_queue') or {}
         try:
             summary = ""; p_meta = sb.table("pod_scra_metadata").select("content").eq("key_name", "PROMPT_FALLBACK").single().execute()
             sys_prompt = p_meta.data['content'] if p_meta.data else "分析情報。"
@@ -93,7 +94,7 @@ def run_stt_to_summary_mission(sb):
                 if ai_resp.status_code == 200: summary = ai_resp.json().get('choices', [{}])[0].get('message', {}).get('content', "")
 
             elif provider == "GEMINI":
-                a_url = f"{s['R2_URL']}/{intel['mission_queue']['r2_url']}"; m_type = "audio/ogg" if ".opus" in a_url.lower() or ".ogg" in a_url.lower() else "audio/mpeg"
+                a_url = f"{s['R2_URL']}/{q_data.get('r2_url', '')}"; m_type = "audio/ogg" if ".opus" in a_url.lower() or ".ogg" in a_url.lower() else "audio/mpeg"
                 raw_bytes = requests.get(a_url, timeout=120).content
                 b64_audio = base64.b64encode(raw_bytes).decode('utf-8'); del raw_bytes; gc.collect()
                 g_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={s['GEMINI_KEY']}"
@@ -106,7 +107,7 @@ def run_stt_to_summary_mission(sb):
 
             if summary:
                 m = parse_intel_metrics(summary); sb.table("mission_intel").update({"summary_text": summary, "intel_status": "Sum.-ready", "report_date": datetime.now().strftime("%Y-%m-%d"), "total_score": m["score"]}).eq("task_id", task_id).execute()
-                report_msg = f"🎙️ {intel['mission_queue']['source_name']}\n📌 {intel['mission_queue']['episode_title']}\n\n{summary}"
+                report_msg = f"🎙️ {q_data.get('source_name', '未知來源')}\n📌 {q_data.get('episode_title', '未知標題')}\n\n{summary}"
                 requests.post(f"https://api.telegram.org/bot{s['TG_TOKEN']}/sendMessage", json={"chat_id": s["TG_CHAT"], "text": report_msg[:4000], "parse_mode": "Markdown"})
                 sb.table("mission_intel").update({"intel_status": "Sum.-sent"}).eq("task_id", task_id).execute()
                 print(f"🎉 [{provider}] 情報傳遞成功。")
