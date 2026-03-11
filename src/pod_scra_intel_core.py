@@ -28,52 +28,93 @@ def parse_intel_metrics(text):
     except: pass
     return metrics
 
+
+
 # =========================================================
-# 🎤 第一棒：Audio to STT (接收 sb 參數版)
+# 🎤 第一棒：Audio to STT (搭載戰場觀測儀版)
 # =========================================================
 def run_audio_to_stt_mission(sb): 
     """負責物資分流與轉譯啟動"""
-    s = get_secrets(); worker_id = os.environ.get("WORKER_ID", "UNKNOWN"); mem_tier = int(os.environ.get("MEMORY_TIER", 256)) 
+    s = get_secrets()
+    worker_id = os.environ.get("WORKER_ID", "UNKNOWN")
+    mem_tier = int(os.environ.get("MEMORY_TIER", 256)) 
     sort_desc = (mem_tier >= 512)
+    
+    print(f"🔍 [{worker_id}] 正在搜尋 STT 任務... (本機記憶體體量: {mem_tier}MB)")
     res = sb.table("view_worker_task_inbox").select("*").order("audio_size_mb", desc=sort_desc).limit(1).execute()
 
-    if not res.data: return
+    if not res.data: 
+        print(f"☕ [{worker_id}] 目前沒有需要 STT 的任務。")
+        return
+        
     for task in res.data:
-        task_id = task['id']; r2_url = task.get('r2_url', '').lower()
+        task_id = task['id']
+        r2_url = task.get('r2_url', '').lower()
+        print(f"🎯 [{worker_id}] 鎖定目標: {task['source_name']} (格式: {r2_url[-4:]})")
+        
         try:
             # --- 🛠️ 階段 A：512MB 窄化壓縮 ---
-            # 🚀 修正：同時攔截 mp3 與 m4a 交給 512MB 節點處理
             if mem_tier >= 512 and (r2_url.endswith('.mp3') or r2_url.endswith('.m4a')):
+                print(f"⚙️ [{worker_id}] 啟動 FFmpeg 壓縮引擎...")
                 success, new_url = compress_task_to_opus(task_id, task['r2_url'])
                 if success:
+                    print(f"✅ [{worker_id}] 壓縮成功，新檔名: {new_url}。將直接進入 AI 轉譯！")
                     sb.table("mission_queue").update({"r2_url": new_url, "audio_ext": ".opus"}).eq("id", task_id).execute()
-                continue 
+                    # 🚀 [重大修復]：將更新後的網址賦值給當前變數，繼續往下跑 AI 流程，而不是 continue 跳出！
+                    r2_url = new_url
+                    task['r2_url'] = new_url
+                else:
+                    print(f"❌ [{worker_id}] 壓縮失敗，放棄此任務。")
+                    continue # 壓縮失敗才跳出，讓別人接手
 
-            # --- 🛠️ 階段 B：AI 轉譯分流 ---
-            # 🚀 修正：256MB 的小節點，遇到 mp3 與 m4a 一律迴避，避免 OOM 崩潰
+            # --- 🛠️ 階段 B：迴避機制 ---
             if mem_tier < 512 and (r2_url.endswith('.mp3') or r2_url.endswith('.m4a')): 
+                print(f"🛡️ [{worker_id}] 體量不足，主動迴避巨大檔案，讓重裝部隊處理。")
                 continue
 
-
+            # --- 🛠️ 階段 C：AI 轉譯分流 ---
             chosen_provider = random.choice(["GROQ", "GEMINI"])
+            print(f"🧠 [{worker_id}] 進入 AI 轉譯階段，抽籤決定使用: {chosen_provider}")
+            
             sb.table("mission_intel").insert({"task_id": task_id, "intel_status": "Sum.-proc", "ai_provider": chosen_provider}).execute()
 
             if chosen_provider == "GROQ":
+                print(f"🚀 [{worker_id}] 準備發送音檔至 Groq API...")
                 m_type = "audio/ogg" if ".opus" in r2_url else "audio/mpeg"
-                audio_data = requests.get(f"{s['R2_URL']}/{task['r2_url']}", timeout=60).content
+                
+                print(f"📥 [{worker_id}] 從 R2 緩存音檔: {s['R2_URL']}/{task['r2_url']}")
+                audio_response = requests.get(f"{s['R2_URL']}/{task['r2_url']}", timeout=60)
+                audio_response.raise_for_status() # 如果 R2 下載失敗，會在這裡拋出例外被捕捉
+                audio_data = audio_response.content
+                
+                print(f"📤 [{worker_id}] 發送給 Groq Whisper 模型...")
                 stt_resp = requests.post("https://api.groq.com/openai/v1/audio/transcriptions", 
                     headers={"Authorization": f"Bearer {s['GROQ_KEY']}"},
                     files={'file': (task['r2_url'], audio_data, m_type)},
                     data={'model': 'whisper-large-v3', 'response_format': 'text', 'language': 'en'}, timeout=120)
+                    
                 if stt_resp.status_code == 200:
+                    print(f"🎉 [{worker_id}] Groq 轉寫成功！寫入資料庫...")
                     sb.table("mission_intel").update({"stt_text": stt_resp.text, "intel_status": "Sum.-pre"}).eq("task_id", task_id).execute()
+                else:
+                    # 🚀 [新增除錯]：印出 Groq 拒絕的詳細原因
+                    print(f"💥 [{worker_id}] Groq 轉寫失敗 (HTTP {stt_resp.status_code}): {stt_resp.text}")
+                    raise Exception(f"Groq API Error: {stt_resp.status_code}")
+                    
                 del audio_data; gc.collect()
             else:
+                print(f"🤖 [{worker_id}] 選擇 Gemini 流水線，先掛上代位符...")
                 sb.table("mission_intel").update({"stt_text": "[GEMINI_2.5_NATIVE_STREAM]", "intel_status": "Sum.-pre"}).eq("task_id", task_id).execute()
+                
         except Exception as e:
-            print(f"💥 [加工中斷]: {e}"); sb.table("mission_intel").delete().eq("task_id", task_id).execute()
+            # 🚀 [新增除錯]：將崩潰的詳細原因印在 LOG 上
+            print(f"💥 [{worker_id}] [加工中斷嚴重錯誤]: {str(e)}")
+            try:
+                # 嘗試刪除標記，讓任務能被重新領取
+                sb.table("mission_intel").delete().eq("task_id", task_id).execute()
+            except: pass
+            
         time.sleep(15); gc.collect()
-
 # =========================================================
 # ✍️ 第二棒：STT to Summary (接收 sb 參數版)
 # =========================================================
