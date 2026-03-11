@@ -27,6 +27,10 @@ jobs:
       # 🔐 [游擊隊專屬] 代理密鑰
       WEBSHARE_LIST: ${{ secrets.WEBSHARE_LIST }}
       
+      # 🛡️ [防禦性配置] 補回 AI 密鑰，防止 AIAgent 啟動檢查時報錯
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      
       # 🚀 [新增] R2 兵工廠密鑰 (交接給 T2 必備)
       R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -57,8 +61,8 @@ jobs:
           # 🚀 關鍵：安裝 libopus-dev 以支援 16k Mono Opus 轉碼
           sudo apt-get update && sudo apt-get install -y ffmpeg libopus-dev
           python -m pip install --upgrade pip
-          # 🚀 [修正] 移除 groq，新增 boto3 支援 R2 上傳
-          pip install "curl_cffi>=0.7.0" "requests[socks]" feedparser PySocks python-dotenv supabase google-cloud-storage boto3
+          # 🚀 [修正] 補回裝飾用 AI 套件 (google-generativeai, groq) 滿足父類別依賴
+          pip install "curl_cffi>=0.7.0" "requests[socks]" feedparser PySocks python-dotenv supabase google-cloud-storage boto3 google-generativeai groq
       
       - name: ⚔️ [突擊] 啟動 g-小隊領命任務
         run: |
