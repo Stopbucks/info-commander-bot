@@ -1,13 +1,14 @@
 
 # ---------------------------------------------------------
-# src/pod_scra_intel_core.py v4.4 (2026 三位一體-情報加工官)
+# src/pod_scra_intel_core.py v4.5 (2026 情報官 + groq)
 # 任務：1. 分流決策 2. STT 轉譯 3. 情報摘要 4. GEMINI 2.5
-# 修正：MIME 動態適配、解決 NameError、強化變數定義 、ffmpeg適用
+# 修正：MIME 動態適配、解決 NameError、ffmpeg適用 、 groq 獨立出去
 # ---------------------------------------------------------
 
 import os, requests, json, time, random, base64, re, gc
 from datetime import datetime, timezone
 from src.pod_scra_intel_r2 import compress_task_to_opus
+from src.pod_scra_intel_groqcore import GroqFallbackAgent
 
 def get_secrets():
     """集中管理所有外部金鑰"""
@@ -84,14 +85,18 @@ def run_stt_to_summary_mission(sb):
     for intel in res.data:
         # 🚀 增加 q_data 安全變數，防止 KeyError 崩潰
         task_id = intel['task_id']; provider = intel['ai_provider']; q_data = intel.get('mission_queue') or {}
+
         try:
             summary = ""; p_meta = sb.table("pod_scra_metadata").select("content").eq("key_name", "PROMPT_FALLBACK").single().execute()
             sys_prompt = p_meta.data['content'] if p_meta.data else "分析情報。"
 
             if provider == "GROQ":
-                payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "system", "content": sys_prompt}, {"role": "user", "content": f"逐字稿：\n\n{intel['stt_text'][:50000]}"}], "temperature": 0.3}
-                ai_resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers={"Authorization": f"Bearer {s['GROQ_KEY']}"}, json=payload, timeout=90)
-                if ai_resp.status_code == 200: summary = ai_resp.json().get('choices', [{}])[0].get('message', {}).get('content', "")
+                # -------------------------------------------------------------
+                # 🚀 委託給外部模組：呼叫 pod_scra_intel_groqcore 處理
+                # -------------------------------------------------------------
+                print("🛡️ [防爆啟動] 委託 GroqFallbackAgent 處理長文本...")
+                groq_agent = GroqFallbackAgent()
+                summary = groq_agent.generate_summary(intel['stt_text'], sys_prompt)
 
             elif provider == "GEMINI":
                 a_url = f"{s['R2_URL']}/{q_data.get('r2_url', '')}"; m_type = "audio/ogg" if ".opus" in a_url.lower() or ".ogg" in a_url.lower() else "audio/mpeg"
