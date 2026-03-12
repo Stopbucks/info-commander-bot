@@ -11,12 +11,18 @@
 ##########################################################################
 
 name: Info Commander Podcast Sync
-
 on:
-  # 🚀 外部 API 觸發點 (供 cron-job.org 使用)
-  repository_dispatch:
-    types: [weekday_lite_task]
+  schedule:
+    # 🚀 台北 21:00 (每日) = UTC 13:00 (每日)
+    # 💡 讓 Python 內部的 weekday 邏輯去決定今天要實戰還是溫養
+    - cron: '0 13 * * *'
 
+#------以下原先方式-----(暫停使用)----
+#on:
+#  # 🚀 外部 API 觸發點 (供 cron-job.org 使用)
+#  repository_dispatch:
+#    types: [weekday_lite_task]
+#
   # 🛠️ 手動測試啟動
   workflow_dispatch:
     inputs:
@@ -104,7 +110,7 @@ jobs:
         # 使用系統 timeout 15秒，即使網路斷掉也會在 15 秒內強制結束
         timeout 15s curl -s4 --retry 1 https://api.ip.sb/geoip || echo "⚠️ 出口偵測逾時，將嘗試直接執行任務。"
 #---[區塊 C]：條件式預熱前面程式碼相同---#
-# -----(定位線)以下修改----
+
     - name: ⏳ 雙機聯動深度預熱 (Fly.io Dual-Node Warmup)
       # 💡 修正：路徑 A (FlyJP) 或 路徑 C (FlyLA) 都要進來預熱
       if: contains(fromJSON('["A", "C"]'), env.PATH_ID)
@@ -137,7 +143,7 @@ jobs:
         
         echo "❌ [安全熔斷] 代理節點 $TARGET_PATH 在 200 秒內無法就緒，終止任務以保護帳號安全。"
         exit 1
-#---下一步執行任務---#
+
 
     - name: 🚀 執行任務 (Run Info Commander)
       env:
