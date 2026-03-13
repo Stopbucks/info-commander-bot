@@ -1,139 +1,124 @@
-
 # ---------------------------------------------------------
-# S-Plan Fortress v4.2.2   (2026 RENDER + KOYEB；512MB 記憶體)
-# 任務：1. 接口防震 2. 指令下達 3. 排程管理 4. 線程安全鎖
-# 核心：本檔案僅負責「流程調控」，具體「物流/AI」由 src/ 模組執行
+# app.py (2026 RENDER/KOYEB V5.1 破冰守衛與軟失敗版)
+# 任務：1. 接口防震 2. 30分鐘破冰守衛 3. 崩潰通報判官 4. 全軍狀態機
 # ---------------------------------------------------------
-import os, time, json, requests, random, threading, traceback, gc
+import os, time, gc, random, threading, traceback
 from datetime import datetime, timezone, timedelta
-from flask import Flask, jsonify, request
+from flask import Flask, request
 from supabase import create_client
 from apscheduler.schedulers.background import BackgroundScheduler
-from src.pod_scra_intel_trans import execute_fortress_stages    # 修正 ：匯入總指揮程序
 
+from src.pod_scra_intel_trans import execute_fortress_stages 
 
 app = Flask(__name__)
-
-# === 🎖️ 指揮部配置 ===
-INTEL_AUDIO_OFFICERS = ["FLY_LAX", "RENDER", "HUGGINGFACE", "KOYEB"] 
-INTEL_TXT_OFFICERS =   ["FLY_LAX", "RENDER", "HUGGINGFACE", "KOYEB"]
+INTEL_AUDIO_OFFICERS = ["FLY_LAX", "RENDER", "HUGGINGFACE", "KOYEB", "DBOS"] 
 
 CONFIG = {
     "WORKER_ID": os.environ.get("WORKER_ID", "UNKNOWN_NODE"),
-    "INTERVAL_HOURS": 2, "CRON_SECRET": os.environ.get("CRON_SECRET"),
-    "JITTER_BASE_MIN": 180, "JITTER_BASE_MAX": 360
+    "INTERVAL_HOURS": 2, 
+    "CRON_SECRET": os.environ.get("CRON_SECRET")
 }
 
-# --- 🛠️ 核心連線工具 ---
+# 🚀 宣告火力為 512MB 部隊！ & KOYEB 為256MB，進行A/B測試。
+os.environ["MEMORY_TIER"] = "512"
+
+# 🛡️ 破冰守衛 (Watchdog) 系統配置
+MISSION_LOCK = threading.Lock()
+MISSION_STATE = {"is_running": False, "start_time": 0.0}
+WATCHDOG_TIMEOUT = 1800  # 輕裝部隊寬限期：30 分鐘 (1800秒)
+
 def get_sb(): 
-    """建立並回傳 Supabase 連線物件"""
     return create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
 
-
 def s_log(sb, task_type, status, message, err_stack=None):
-    """將任務狀態寫入 Supabase 紀錄表"""
     try:
-        print(f"[{task_type}][{status}] {message}")
-        sb.table("mission_logs").insert({
-            "worker_id": CONFIG["WORKER_ID"], "task_type": task_type,
-            "status": status, "message": message, "traceback": err_stack
-        }).execute()
+        print(f"[{task_type}][{status}] {message}", flush=True)
+        if status in ["SUCCESS", "ERROR"] or "啟動" in message or "V5.1" in message:
+            sb.table("mission_logs").insert({
+                "worker_id": CONFIG["WORKER_ID"], "task_type": task_type,
+                "status": status, "message": message, "traceback": err_stack
+            }).execute()
     except: pass
 
-# 🛡️ 戰術防護鎖：防止併發點火引爆
-MISSION_LOCK = threading.Lock()
-IS_RUNNING = False
-
-# --- 🛰️ AI 情報工廠線 ---
-def trigger_intel_pipeline(sb):
-    """序列化驅動 AI 任務，並將已建立的 sb 物件傳遞下去 (防崩潰關鍵)"""
-    worker = CONFIG["WORKER_ID"]
+def report_soft_failure(sb, worker_id, error_msg):
+    """【系統自救】回報軟失敗給 Vercel 判官"""
     try:
-        gc.collect() 
-        from src.pod_scra_intel_core import run_audio_to_stt_mission, run_stt_to_summary_mission
+        print(f"🚨 [通報判官] 發生嚴重異常，寫入軟失敗紀錄！", flush=True)
+        res = sb.table("pod_scra_tactics").select("consecutive_soft_failures").eq("id", 1).single().execute()
+        current_fails = res.data.get("consecutive_soft_failures", 0) if res.data else 0
         
-        # 🚀 修正 2：恢復兵種核對機制
-        if worker in INTEL_AUDIO_OFFICERS:
-            s_log(sb, "AI", "INFO", f"🎤 [音訊組] {worker} 啟動轉譯流水線")
-            run_audio_to_stt_mission(sb) 
-        
-        time.sleep(30) # 🚀 冷卻緩衝
+        sb.table("pod_scra_tactics").update({
+            "consecutive_soft_failures": current_fails + 1,
+            "last_error_type": f"{worker_id}_CRASH: {error_msg}"[:200]
+        }).eq("id", 1).execute()
+    except Exception as e: 
+        print(f"軟失敗通報異常: {e}")
 
-        if worker in INTEL_TXT_OFFICERS:
-            s_log(sb, "AI", "INFO", f"✍️ [文字組] {worker} 啟動摘要加工")
-            run_stt_to_summary_mission(sb) 
-            
-    except Exception as e:
-        print(f"⚠️ [AI流水線異常]: {e}")
-        traceback.print_exc()
-
-# --- 綜合巡邏任務 (總執行緒) ---
 def run_integrated_mission():
-    """主發令程序：負責連線建立與最終清理"""
-    global IS_RUNNING
-    if MISSION_LOCK.locked() or IS_RUNNING: return
-    with MISSION_LOCK:
-        IS_RUNNING = True 
-        sb = None
-        try:
-            sb = get_sb()
-            # 🚀 三位一體聯動：呼叫 Trans 模組執行全階段邏輯
-            execute_fortress_stages(sb, CONFIG, s_log, trigger_intel_pipeline, INTEL_AUDIO_OFFICERS)
-        except Exception as e:
-            print(f"💥 戰場總體崩潰: {e}")
-        finally:
-            if sb: del sb
-            IS_RUNNING = False
-            gc.collect()
-            print("🏁 [巡邏結束] 指揮中心 READY。")
-            
+    global MISSION_STATE
+    sb = get_sb()
+    try:
+        # 🚀 專屬信號彈
+        s_log(sb, "SYSTEM", "SUCCESS", f"🚀 [{CONFIG['WORKER_ID']} V5.1] 輕裝部隊連線，破冰守衛(30m)與自救機制就位！")
+        # 🚀 呼叫全軍統一狀態機
+        execute_fortress_stages(sb, CONFIG, s_log, lambda x: None, INTEL_AUDIO_OFFICERS)
+        
+    except Exception as e:
+        error_msg = str(e)
+        print(f"💥 戰場崩潰: {error_msg}")
+        report_soft_failure(sb, CONFIG["WORKER_ID"], error_msg)
+    finally:
+        # 🛡️ 任務結束：安全歸還鎖定與清理
+        MISSION_STATE["is_running"] = False
+        if MISSION_LOCK.locked():
+            try: MISSION_LOCK.release()
+            except: pass
+        del sb; gc.collect()
+        print("🏁 [巡邏結束] READY。")
 
-            
-# --- 📡 接口與排程 ( 512MB 裝甲通用版) ---
 
 @app.route('/')
-def health(): 
-    # 🚀 修正：移除 print，避免 RENDER 的健康檢查爆擊佔用 log 緩衝區
-    # 只保留極輕量的回傳
-    return "OK", 200
-
+def health(): return "OK", 200
 
 @app.route('/ping')
 def trigger():
-    global IS_RUNNING
-    # 🚀 1：第一道門防衛 (優先權限核驗，減少無效開銷)
+    global MISSION_STATE
     token = request.args.get('token')
-    if not token or token != CONFIG['CRON_SECRET']:
-        return "Unauthorized", 401
+    if not token or token != CONFIG['CRON_SECRET']: return "Unauthorized", 401
     
-    # 🚀 2：第二道門防衛 (瞬發 Busy Check，不進入 sleep)
-    if IS_RUNNING or MISSION_LOCK.locked():
-        return "Too Many Requests - Mission in Progress", 429
+    current_time = time.time()
+    
+    # --- 🛡️ 破冰守衛：巡視與強制解鎖 ---
+    if MISSION_STATE["is_running"]:
+        elapsed = current_time - MISSION_STATE["start_time"]
+        if elapsed > WATCHDOG_TIMEOUT:
+            print(f"🚨 [破冰守衛] 任務死結 ({elapsed:.0f}s)！強制擊碎門鎖並通報判官！")
+            sb = get_sb()
+            report_soft_failure(sb, CONFIG["WORKER_ID"], "Watchdog_Timeout_Deadlock")
+            MISSION_STATE["is_running"] = False
+            if MISSION_LOCK.locked():
+                try: MISSION_LOCK.release()
+                except: pass
+        else:
+            return f"Busy ({elapsed:.0f}s elapsed)", 429
 
-    # 🚀 3：避震抖動 (僅對獲准者執行延遲)
-    time.sleep(random.uniform(3.0, 8.0))
+    time.sleep(random.uniform(1.0, 3.0))
 
-    # 🚀 4：雙重確認 (Double-Check)，確保延遲期間無併發任務
-    if IS_RUNNING or MISSION_LOCK.locked():
-        return "Locked", 429
-
-    # 🚀 5： 點火執行
+    # --- 🚪 嘗試進入主防線 ---
+    if not MISSION_LOCK.acquire(blocking=False): return "Locked", 429
+    
+    MISSION_STATE["is_running"] = True
+    MISSION_STATE["start_time"] = time.time()
+    
     threading.Thread(target=run_integrated_mission, daemon=True).start()
     return f"Mission Triggered", 202
 
-# 🕒 排程啟動系統 (修正啟動邏輯)
+# 內部備用排程器
 scheduler = BackgroundScheduler()
-# 🚀 延遲 5 分鐘後啟動首次自動巡邏，避開部署初期的資源尖峰
 run_next = datetime.now() + timedelta(minutes=5)
-scheduler.add_job(
-    func=run_integrated_mission, 
-    trigger="interval", 
-    hours=CONFIG["INTERVAL_HOURS"],
-    next_run_time=run_next
-)
+scheduler.add_job(func=run_integrated_mission, trigger="interval", hours=CONFIG["INTERVAL_HOURS"], next_run_time=run_next)
 scheduler.start()
 
 if __name__ == "__main__":
-    # 🚀 自動偵測雲端環境 Port (Render 預設 10000, Koyeb 預設 8080)
     port = int(os.environ.get('PORT', 10000)) 
     app.run(host='0.0.0.0', port=port)
