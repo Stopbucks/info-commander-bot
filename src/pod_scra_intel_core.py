@@ -1,7 +1,6 @@
 # ---------------------------------------------------------
-# src/pod_scra_intel_core.py (全軍統一 V5.1 錯誤拋接版)
-# 任務：1. 依據戰力自動切換「開路壓縮」或「輕量轉譯」
-# 2. 將異常拋給外層觸發「軟失敗 (Soft Failure)」
+# src/pod_scra_intel_core.py (全軍統一 V5.1 錯誤拋接 + 友軍防撞版)
+# 任務：1. 自動切換重裝/輕裝 2. 拋出真實崩潰 3. 攔截 23505 友軍搶單
 # ---------------------------------------------------------
 import os, time, random, gc
 from supabase import create_client
@@ -75,9 +74,14 @@ def run_audio_to_stt_mission(sb=None):
                 print(f"✅ [{worker_id}] GEMINI 鎖定原生流")
 
         except Exception as e:
-            print(f"💥 [{worker_id}] 第一棒打擊失敗: {e}")
-            delete_intel_task(sb, task_id)
-            raise e # 🚀 拋給 app.py 觸發軟失敗
+            err_str = str(e)
+            # 🚀 友軍防撞機制：攔截 23505 Duplicate Key 錯誤
+            if '23505' in err_str or 'duplicate key' in err_str.lower():
+                print(f"🤝 [{worker_id}] 競態攔截：任務已被友軍先行接管，自動撤退！")
+            else:
+                print(f"💥 [{worker_id}] 第一棒打擊失敗: {err_str}")
+                delete_intel_task(sb, task_id)
+                raise e # 只有真正的崩潰才拋出，觸發軟失敗
         finally:
             gc.collect()
 
@@ -118,6 +122,6 @@ def run_stt_to_summary_mission(sb=None):
 
         except Exception as e:
             print(f"❌ [{worker_id}] 第二棒崩潰: {e}")
-            raise e # 🚀 拋給 app.py 觸發軟失敗
+            raise e 
         finally:
             gc.collect()
