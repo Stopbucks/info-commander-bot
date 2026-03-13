@@ -25,7 +25,7 @@ os.environ["MEMORY_TIER"] = "512"
 # 🛡️ 破冰守衛 (Watchdog) 系統配置
 MISSION_LOCK = threading.Lock()
 MISSION_STATE = {"is_running": False, "start_time": 0.0}
-WATCHDOG_TIMEOUT = 1800  # 輕裝部隊寬限期：30 分鐘 (1800秒)
+WATCHDOG_TIMEOUT = 3600  # 部隊寬限期：60 分鐘 (1800秒)
 
 def get_sb(): 
     return create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
