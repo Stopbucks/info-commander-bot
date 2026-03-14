@@ -40,19 +40,41 @@ def s_log(sb, task_type, status, message, err_stack=None):
             }).execute()
     except: pass
 
+
 def report_soft_failure(sb, worker_id, error_msg):
-    """【系統自救】回報軟失敗給 Vercel 判官"""
+    """【系統自救】精準軟失敗通報：嚴格區分主將與後勤兵"""
     try:
-        print(f"🚨 [通報判官] 發生嚴重異常，寫入軟失敗紀錄！", flush=True)
-        res = sb.table("pod_scra_tactics").select("consecutive_soft_failures").eq("id", 1).single().execute()
-        current_fails = res.data.get("consecutive_soft_failures", 0) if res.data else 0
+        print(f"🚨 [通報判官] 發生異常，正在評估影響範圍...", flush=True)
+        res = sb.table("pod_scra_tactics").select("active_worker, consecutive_soft_failures, worker_status").eq("id", 1).single().execute()
+        if not res.data: return
         
-        sb.table("pod_scra_tactics").update({
-            "consecutive_soft_failures": current_fails + 1,
-            "last_error_type": f"{worker_id}_CRASH: {error_msg}"[:200]
-        }).eq("id", 1).execute()
+        tactic = res.data
+        active_worker = tactic.get("active_worker")
+        current_fails = tactic.get("consecutive_soft_failures", 0)
+        
+        if worker_id == active_worker:
+            # 🛡️ 情況 A：我是主將。我的崩潰會影響大局，必須累加失敗次數，觸發強制換班！
+            sb.table("pod_scra_tactics").update({
+                "consecutive_soft_failures": current_fails + 1,
+                "last_error_type": f"🚨 [主將] {worker_id} 崩潰: {error_msg}"[:200]
+            }).eq("id", 1).execute()
+            print(f"⚠️ 身為主將，已觸發軟失敗計數 ({current_fails + 1}/3)")
+            
+        else:
+            # 🛡️ 情況 B：我是後勤兵。我的崩潰 (如 API 斷線) 不該害主將被換掉！
+            # 將錯誤寫入自己的 worker_status 供備查，並更新佈告欄，但【不增加】失敗計數
+            w_status = tactic.get("worker_status", {})
+            w_status[f"{worker_id}_last_err"] = str(error_msg)[:100]
+            
+            sb.table("pod_scra_tactics").update({
+                "worker_status": w_status,
+                "last_error_type": f"⚠️ [後勤] {worker_id} 局部異常: {error_msg}"[:200]
+            }).eq("id", 1).execute()
+            print(f"ℹ️ 身為後勤兵，已將異常寫入日誌，不影響主將輪替。")
+            
     except Exception as e: 
-        print(f"軟失敗通報異常: {e}")
+        print(f"通報系統本身發生異常: {e}")
+
 
 def run_integrated_mission():
     global MISSION_STATE
