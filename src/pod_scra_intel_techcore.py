@@ -5,7 +5,7 @@
 # 特色：用完即丟！將記憶體消耗限制在函式內部，保護 256接近512MB 戰機
 # 不同於FLY，RENDER稍微加重任務量(FLY確定是256MB，KOYEB/Render稍多)
 # ---------------------------------------------------------
-# 3. 呼叫外部 AI API 4. 發送 Telegram 戰報 (具備絕對拋錯機制)
+# 3. fix supbase insert (upsert_intel_status)
 # ---------------------------------------------------------
 
 import requests, base64, re, gc
@@ -29,11 +29,13 @@ def fetch_summary_tasks(sb):
     return sb.table("mission_intel").select("*, mission_queue(episode_title, source_name, r2_url)").eq("intel_status", "Sum.-pre").order("created_at").limit(10).execute().data or []
 
 def upsert_intel_status(sb, task_id, status, provider=None, stt_text=None):
-    """【幽靈輾壓】強制寫入/覆蓋狀態，避免 Duplicate Key 卡死"""
+    """【幽靈輾壓 V5.3】原生防撞版！利用 on_conflict 讓資料庫自己解決重複問題"""
     payload = {"task_id": task_id, "intel_status": status}
     if provider: payload["ai_provider"] = provider
     if stt_text: payload["stt_text"] = stt_text
-    sb.table("mission_intel").upsert(payload).execute()
+    
+    # 🚀 加上 on_conflict="task_id"，Supabase 就會聰明地自動切換 Insert 或 Update！
+    sb.table("mission_intel").upsert(payload, on_conflict="task_id").execute()
 
 def update_intel_success(sb, task_id, summary, score):
     """【安全結案】將摘要存入資料庫"""
