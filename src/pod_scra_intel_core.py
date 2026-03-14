@@ -62,7 +62,8 @@ def run_audio_to_stt_mission(sb=None):
                 else:
                     raise Exception("FFmpeg Compression Failed")
 
-            chosen_provider = random.choice(["GROQ", "GEMINI"])
+            #chosen_provider = random.choice(["GROQ", "GEMINI"])
+            chosen_provider = "GEMINI"  # 🚨 Groq 503 當機中，全線強制切換至 GEMINI
             print(f"🎲 [{worker_id}] 戰術分流 -> [{chosen_provider}]")
             upsert_intel_status(sb, task_id, "Sum.-proc", chosen_provider)
 
