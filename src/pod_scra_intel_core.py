@@ -1,6 +1,7 @@
 # ---------------------------------------------------------
-# src/pod_scra_intel_core.py (全軍統一 V5.1 錯誤拋接 + 友軍防撞版)
-# 任務：1. 自動切換重裝/輕裝 2. 拋出真實崩潰 3. 攔截 23505 友軍搶單
+# src/pod_scra_intel_core.py (全軍統一 V5.2 拆彈裝甲版)
+# 任務：1. 自動切換重裝/輕裝 2. 攔截 23505 友軍搶單
+# 3. 🚨 偵測 404 黑洞：自動抹除 r2_url 並退回重抓
 # ---------------------------------------------------------
 import os, time, random, gc
 from supabase import create_client
@@ -75,13 +76,18 @@ def run_audio_to_stt_mission(sb=None):
 
         except Exception as e:
             err_str = str(e)
-            # 🚀 友軍防撞機制：攔截 23505 Duplicate Key 錯誤
             if '23505' in err_str or 'duplicate key' in err_str.lower():
                 print(f"🤝 [{worker_id}] 競態攔截：任務已被友軍先行接管，自動撤退！")
             else:
                 print(f"💥 [{worker_id}] 第一棒打擊失敗: {err_str}")
                 delete_intel_task(sb, task_id)
-                raise e # 只有真正的崩潰才拋出，觸發軟失敗
+                
+                # 🚀 V5.2 拆彈剪刀：偵測 404 黑洞
+                if '404' in err_str and 'Not Found' in err_str:
+                    print(f"🕳️ [{worker_id}] 踩到 404 炸彈！抹除 R2 連結，退回物流佇列重新下載！")
+                    sb.table("mission_queue").update({"r2_url": None, "scrape_status": "pending"}).eq("id", task_id).execute()
+                else:
+                    raise e # 只有非 404 的真實崩潰才觸發軟失敗
         finally:
             gc.collect()
 
@@ -121,7 +127,15 @@ def run_stt_to_summary_mission(sb=None):
                 send_tg_report(s, q_data.get('source_name', '未知'), q_data.get('episode_title', '未知'), summary)
 
         except Exception as e:
-            print(f"❌ [{worker_id}] 第二棒崩潰: {e}")
-            raise e 
+            err_str = str(e)
+            print(f"❌ [{worker_id}] 第二棒崩潰: {err_str}")
+            
+            # 🚀 V5.2 拆彈剪刀 (摘要階段也有可能踩到 404，特別是 Gemini 原生流)
+            if '404' in err_str and 'Not Found' in err_str:
+                print(f"🕳️ [{worker_id}] 摘要時踩到 404 炸彈！抹除 R2 連結與殘存情報，退回物流佇列！")
+                delete_intel_task(sb, task_id)
+                sb.table("mission_queue").update({"r2_url": None, "scrape_status": "pending"}).eq("id", task_id).execute()
+            else:
+                raise e 
         finally:
             gc.collect()
