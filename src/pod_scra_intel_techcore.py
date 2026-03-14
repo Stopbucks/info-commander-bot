@@ -1,10 +1,13 @@
 # ---------------------------------------------------------
-# 程式碼：src/pod_scra_intel_techcore.py (V5.0 RENDER/KOYEB 軍械與通訊模組)
+# 程式碼：src/pod_scra_intel_techcore.py (V5.1 RENDER/KOYEB 軍械與通訊模組)
 # 職責：1. 封裝所有 Supabase 複雜查詢 2. 處理二進制檔案下載與編碼
 # 3. 呼叫外部 AI API 4. 發送 Telegram 戰報
 # 特色：用完即丟！將記憶體消耗限制在函式內部，保護 256接近512MB 戰機
 # 不同於FLY，RENDER稍微加重任務量(FLY確定是256MB，KOYEB/Render稍多)
 # ---------------------------------------------------------
+# 3. 呼叫外部 AI API 4. 發送 Telegram 戰報 (具備絕對拋錯機制)
+# ---------------------------------------------------------
+
 import requests, base64, re, gc
 from datetime import datetime
 
@@ -22,8 +25,8 @@ def fetch_stt_tasks(sb, mem_tier):
     return query.limit(10).execute().data or []
 
 def fetch_summary_tasks(sb):
-    """【視線穿透】一次抓 15 筆，避免被頂端損壞任務卡死"""
-    return sb.table("mission_intel").select("*, mission_queue(episode_title, source_name, r2_url)").eq("intel_status", "Sum.-pre").order("created_at").limit(15).execute().data or []
+    """【視線穿透】一次抓 10 筆，避免被頂端損壞任務卡死"""
+    return sb.table("mission_intel").select("*, mission_queue(episode_title, source_name, r2_url)").eq("intel_status", "Sum.-pre").order("created_at").limit(10).execute().data or []
 
 def upsert_intel_status(sb, task_id, status, provider=None, stt_text=None):
     """【幽靈輾壓】強制寫入/覆蓋狀態，避免 Duplicate Key 卡死"""
@@ -103,36 +106,41 @@ def parse_intel_metrics(text):
     except: pass
     return metrics
 
-#--- 程式碼相同 (parse_intel_metrics 前面相同) ---#
-# -----(定位線)以下為修正後的 send_tg_report-----
-
 def send_tg_report(secrets, source, title, summary):
-    """【防爆通訊】確保戰報不因 Markdown 語法崩潰，並提供錯誤追蹤"""
-    # 🚀 強化標題防護
-    report_msg = f"🎙️ *{source}*\n📌 *{title}*\n\n{summary}"
+    """【防爆通訊 V5.1】長度截斷、特殊符號清洗、失敗強制拋錯"""
+    # 1. 🛡️ 安全截斷：確保總字數不超過 TG 極限 (4096)，抓 3800 留安全邊際
+    safe_summary = summary[:3800] + ("...\n(因字數限制截斷)" if len(summary) > 3800 else "")
+    
+    # 2. 🧹 標題與來源符號清洗：避免 Markdown 解析錯誤
+    safe_source = str(source).replace("_", "＿").replace("*", "＊").replace("[", "〔").replace("]", "〕").replace("`", "‵")
+    safe_title = str(title).replace("_", "＿").replace("*", "＊").replace("[", "〔").replace("]", "〕").replace("`", "‵")
+    
+    report_msg = f"🎙️ *{safe_source}*\n📌 *{safe_title}*\n\n{safe_summary}"
     
     url = f"https://api.telegram.org/bot{secrets['TG_TOKEN']}/sendMessage"
     payload = {
         "chat_id": secrets["TG_CHAT"],
-        "text": report_msg[:4000],
+        "text": report_msg,
         "parse_mode": "Markdown" 
     }
     
     try:
         resp = requests.post(url, json=payload, timeout=15)
-        # 🚀 如果 Markdown 解析失敗，自動退回純文字模式發送，確保情報必達
+        # 🚀 如果 Markdown 解析失敗 (400 Bad Request)，啟動純文字迫降模式
         if resp.status_code != 200:
-            print(f"⚠️ [TG 通訊報警] Markdown 解析失敗，嘗試純文字模式重新發送...")
+            print(f"⚠️ [TG 通訊報警] Markdown 解析失敗 ({resp.text})。嘗試純文字模式...")
             payload["parse_mode"] = None
             resp = requests.post(url, json=payload, timeout=15)
         
+        # 🚨 終極檢查：如果連純文字都發不出去，必須拋出 Exception 阻斷結案！
         if resp.status_code == 200:
             print(f"📡 [TG 通訊] 戰報已送達。")
             return True
         else:
-            print(f"❌ [TG 通訊] 最終發送失敗: {resp.text}")
-            return False
+            error_msg = f"Telegram 終極發送失敗: {resp.text}"
+            print(f"❌ {error_msg}")
+            raise Exception(error_msg) # 💥 致命拋錯
+            
     except Exception as e:
-        print(f"💥 [TG 通訊] 硬體故障: {str(e)}")
-        return False
-
+        print(f"💥 [TG 通訊] 硬體或網路故障: {str(e)}")
+        raise e # 💥 將錯誤往上層拋給 core.py 或 gha_stt_mission.py 攔截
