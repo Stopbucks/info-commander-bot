@@ -38,8 +38,9 @@ def get_sb():
     s = get_secrets()
     return create_client(s["SB_URL"], s["SB_KEY"])
 
+
 # =========================================================
-# 🎤 第一棒：Audio to STT 
+# 🎤 第一棒：Audio to STT (V5.3 包含 Groq 偵察兵測試機制)
 # =========================================================
 def run_audio_to_stt_mission(sb=None):
     start_time = time.time()
@@ -90,8 +91,18 @@ def run_audio_to_stt_mission(sb=None):
                     print(f"❌ [{worker_id}] 壓縮失敗，放棄此任務。")
                     continue 
 
-            # 🚨 戰術強制：暫時全數切換至 GEMINI 避開 Groq 503
-            chosen_provider = "GEMINI" 
+            # ==========================================
+            # --- 🛠️ 階段 B：分流與偵察兵測試 ---
+            # ==========================================
+            #GROQ_SCOUT_ID = "ZEABUR"  # 🎯 指定測試 GROQ 的機甲代號 (改為 "NONE" 可關閉測試)
+            GROQ_SCOUT_ID = "NONE"  # 🎯 指定測試 GROQ 的機甲代號 (改為 "NONE" 可關閉測試)
+            
+            if worker_id == GROQ_SCOUT_ID:
+                print(f"🕵️ [{worker_id}] 擔任偵察兵，嘗試切換至 GROQ 進行歸隊測試...")
+                chosen_provider = "GROQ" 
+            else:
+                chosen_provider = "GEMINI" 
+
             print(f"🎲 [{worker_id}] 戰術分流 -> [{chosen_provider}]")
             upsert_intel_status(sb, task_id, "Sum.-proc", chosen_provider)
 
@@ -99,7 +110,7 @@ def run_audio_to_stt_mission(sb=None):
                 print(f"📤 [{worker_id}] 呼叫 Groq 砲火支援...")
                 stt_text = call_groq_stt(s, r2_url)
                 upsert_intel_status(sb, task_id, "Sum.-pre", stt_text=stt_text)
-                print(f"✅ [{worker_id}] GROQ 轉譯成功")
+                print(f"✅ [{worker_id}] GROQ 轉譯成功 (歸隊測試通過！)")
             else:
                 upsert_intel_status(sb, task_id, "Sum.-pre", stt_text="[GEMINI_2.5_NATIVE_STREAM]")
                 print(f"✅ [{worker_id}] GEMINI 鎖定原生流")
@@ -117,8 +128,8 @@ def run_audio_to_stt_mission(sb=None):
                     print(f"🕳️ [{worker_id}] 踩到 404 炸彈！退回物流佇列重新下載！")
                     sb.table("mission_queue").update({"r2_url": None, "scrape_status": "pending"}).eq("id", task_id).execute()
             
-        gc.collect()
-
+        finally:
+            gc.collect()
 # =========================================================
 # ✍️ 第二棒：STT to Summary (指揮官決策層)
 # =========================================================
