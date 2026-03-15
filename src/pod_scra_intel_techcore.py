@@ -1,28 +1,58 @@
 # ---------------------------------------------------------
-# 程式碼：src/pod_scra_intel_techcore.py (V5.4 絕對防禦與雷達升級版)
+# 程式碼：src/pod_scra_intel_techcore.py (V5.4 RENDER、KOYEB、ZEABUR版)
 # 職責：1. 封裝所有 Supabase 複雜查詢 2. 處理二進制檔案下載與編碼
 # 3. 呼叫外部 AI API 4. 發送 Telegram 戰報
 # 特色：用完即丟！將記憶體消耗限制在函式內部，保護 256~512MB 戰機
-# 修正：更新 fetch_stt_tasks 優先挑大檔案、抗崩潰。 檔案+軟失敗=0
+# 修正：1. 實裝軟失敗天花板 (上限6次，毒藥自動隔離)。
+# 2. 依據機器等級 (FLY, 中型, 重裝) 實裝升降冪與容錯揀選邏輯。
 # ---------------------------------------------------------
 import requests, base64, re, gc
 from datetime import datetime
 
-def fetch_stt_tasks(sb, mem_tier, worker_id, fetch_limit=50):
+def fetch_stt_tasks(sb, mem_tier, worker_id="UNKNOWN", fetch_limit=50):
+    """【低耦合戰略閘道】依據軟失敗次數與檔案大小進行動態三級分流"""
     query = sb.table("view_worker_task_inbox").select("*")
     
+    # ☠️ 毒藥天花板：全軍皆無視軟失敗 6 次(含)以上的絕對死檔
+    query = query.or_("soft_failure_count.lt.6,soft_failure_count.is.null")
+
     if mem_tier < 512:
-        # FLY: 只拿壓縮好的小檔
-        query = query.not_.is_("audio_size_mb", "null").ilike("r2_url", "opt_%").lt("audio_size_mb", 15).order("audio_size_mb", desc=False)
-    elif worker_id in ["RENDER", "KOYEB", "ZEABUR"]:
-        # 🚀 中型機甲的避雷針：只拿 soft_failure_count 為 0 或是 null 的任務！
-        query = query.or_("soft_failure_count.eq.0,soft_failure_count.is.null")
+        # 🏹 輕裝游擊隊 (FLY): 安全第一
+        # 條件：無軟失敗(0/null) + 已經壓縮(opt_) + 小於 15MB
+        # 排序：檔案由小至大 (升冪 desc=False)
+        query = query.or_("soft_failure_count.eq.0,soft_failure_count.is.null") \
+                     .not_("audio_size_mb", "is", "null").ilike("r2_url", "opt_%").lt("audio_size_mb", 15) \
+                     .order("audio_size_mb", desc=False)
+                     
+    elif worker_id in ["DBOS", "HUGGINGFACE"]:
+        # 🚜 重裝巨獸 (HF / DBOS)：無差別碾壓
+        # 條件：完全無視軟失敗次數 (受天花板保護即可)
+        # 排序：檔案由大至小 (降冪 desc=True)，優先處理 null (剛載好還沒測大小的原始檔)
         query = query.order("audio_size_mb", desc=True, nulls_first=True)
+                     
     else:
-        # 🚜 DBOS/HF 重裝機甲：無視失敗次數，強制接手所有疑難雜症
-        query = query.order("audio_size_mb", desc=True, nulls_first=True)
+        # 🛡️ 中型部隊 (RENDER / KOYEB / ZEABUR)：穩健推進
+        # 排序一：軟失敗次數由少至多 (升冪 desc=False)，優先處理健康的 (null/0 -> 1 -> 2)
+        # 排序二：同次數下，檔案由大至小 (降冪 desc=True)
+        query = query.order("soft_failure_count", desc=False, nulls_first=True) \
+                     .order("audio_size_mb", desc=True, nulls_first=True)
         
     return query.limit(fetch_limit).execute().data or []
+
+# 🚀 新增：極簡的軟失敗推進器
+def increment_soft_failure(sb, task_id):
+    """【容錯推進】遇到異常不崩潰，僅增加失敗計數並抹除 R2，讓系統下次動態重試"""
+    try:
+        res = sb.table("mission_queue").select("soft_failure_count").eq("id", task_id).single().execute()
+        current_count = res.data.get("soft_failure_count") or 0
+        sb.table("mission_queue").update({
+            "soft_failure_count": current_count + 1,
+            "scrape_status": "success", 
+            "r2_url": "null" # 抹除連結，強迫下一手機甲重新評估與下載
+        }).eq("id", task_id).execute()
+        print(f"🚩 [容錯推進] 任務 {task_id[:8]} 失敗次數 +1 (目前: {current_count + 1}/6)")
+    except Exception as e: 
+        print(f"⚠️ 容錯推進紀錄失敗: {e}")
 
 def fetch_summary_tasks(sb, fetch_limit=50):
     return sb.table("mission_intel").select("*, mission_queue(episode_title, source_name, r2_url)").eq("intel_status", "Sum.-pre").order("created_at").limit(fetch_limit).execute().data or []

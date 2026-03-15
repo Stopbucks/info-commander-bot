@@ -1,10 +1,10 @@
 # ---------------------------------------------------------
-# src/pod_scra_intel_core.py v5.3 (主力 512MB 面板統御版)
+# src/pod_scra_intel_core.py v5.4 (主力 512MB 面板統御版)
 # 適用部隊：RENDER, KOYEB, ZEABUR (512MB) 
 # 任務：1. 導入高階控制面板，集中管理任務量與時間防線。
 # 2. 導入「軟撤退」機制：在 Watchdog 踹門前優雅下班。
 # 3. 徹底拔除 .mp3 摘要防護罩限制，清除產線塞子。
-# 4. 通訊絕對綁定：TG 發送失敗絕對不允許結案！
+# 4. 實裝「容錯推進系統」，遇到崩潰不墜機，交接給重裝部隊！
 # ---------------------------------------------------------
 import os, time, random, gc, traceback
 from supabase import create_client
@@ -14,7 +14,8 @@ from src.pod_scra_intel_groqcore import GroqFallbackAgent
 from src.pod_scra_intel_techcore import (
     fetch_stt_tasks, fetch_summary_tasks, upsert_intel_status, 
     update_intel_success, delete_intel_task, call_groq_stt, 
-    call_gemini_summary, parse_intel_metrics, send_tg_report
+    call_gemini_summary, parse_intel_metrics, send_tg_report,
+    increment_soft_failure # 🚀 引入容錯推進器
 )
 
 # =========================================================
@@ -23,7 +24,7 @@ from src.pod_scra_intel_techcore import (
 RADAR_FETCH_LIMIT = 100        # 📡 雷達掃描深度：看穿舊任務塞子 (建議 50~100)
 STT_LIMIT = 3                  # 🎤 第一棒 (轉譯) 每次排程處理上限
 SUMMARY_LIMIT = 2              # 📝 第二棒 (摘要與TG) 每次排程處理上限
-SAFE_DURATION_SECONDS = 1500   # 🛡️ 撤離防線：25 分鐘 (1500秒)。提早於 app.py 的 30 分鐘暴力中斷，確保優雅下班
+SAFE_DURATION_SECONDS = 1500   # 🛡️ 撤離防線：25 分鐘 (1500秒)。確保優雅下班
 # =========================================================
 
 def get_secrets():
@@ -38,9 +39,8 @@ def get_sb():
     s = get_secrets()
     return create_client(s["SB_URL"], s["SB_KEY"])
 
-
 # =========================================================
-# 🎤 第一棒：Audio to STT (V5.3 包含 Groq 偵察兵測試機制)
+# 🎤 第一棒：Audio to STT (V5.4 包含容錯推進機制)
 # =========================================================
 def run_audio_to_stt_mission(sb=None):
     start_time = time.time()
@@ -52,15 +52,15 @@ def run_audio_to_stt_mission(sb=None):
     
     print(f"🔍 [{worker_id}] 啟動 STT 決策雷達 (戰力: {mem_tier}MB | 掃描: {RADAR_FETCH_LIMIT}筆)...")
     
-    tasks = fetch_stt_tasks(sb, mem_tier, fetch_limit=RADAR_FETCH_LIMIT)
+    # 🚀 傳遞 worker_id 讓雷達知道是誰在要任務
+    tasks = fetch_stt_tasks(sb, mem_tier, worker_id, fetch_limit=RADAR_FETCH_LIMIT)
     if not tasks: 
-        print(f"🛌 [{worker_id}] 目前無適合 {mem_tier}MB 體量之任務。")
+        print(f"🛌 [{worker_id}] 目前無適合體量之任務。")
         return
 
     actual_processed = 0 
     
     for task in tasks:
-        # ⏱️ 戰術防線：數量達標，或逼近撤離時間，立刻停止接單！
         if actual_processed >= STT_LIMIT: 
             print(f"🏁 [{worker_id}] 第一棒已達目標產能 ({STT_LIMIT} 件)，準備交接。")
             break 
@@ -88,14 +88,11 @@ def run_audio_to_stt_mission(sb=None):
                     r2_url = new_url.lower()
                     task['r2_url'] = new_url
                 else:
-                    print(f"❌ [{worker_id}] 壓縮失敗，放棄此任務。")
+                    print(f"❌ [{worker_id}] 壓縮失敗，觸發容錯推進！")
+                    increment_soft_failure(sb, task_id) # 🚀 壓不動，推給重裝部隊
                     continue 
 
-            # ==========================================
-            # --- 🛠️ 階段 B：分流與偵察兵測試 ---
-            # ==========================================
-            #GROQ_SCOUT_ID = "ZEABUR"  # 🎯 指定測試 GROQ 的機甲代號 (改為 "NONE" 可關閉測試)
-            GROQ_SCOUT_ID = "NONE"  # 🎯 指定測試 GROQ 的機甲代號 (改為 "NONE" 可關閉測試)
+            GROQ_SCOUT_ID = "NONE"  
             
             if worker_id == GROQ_SCOUT_ID:
                 print(f"🕵️ [{worker_id}] 擔任偵察兵，嘗試切換至 GROQ 進行歸隊測試...")
@@ -115,7 +112,7 @@ def run_audio_to_stt_mission(sb=None):
                 upsert_intel_status(sb, task_id, "Sum.-pre", stt_text="[GEMINI_2.5_NATIVE_STREAM]")
                 print(f"✅ [{worker_id}] GEMINI 鎖定原生流")
 
-            actual_processed += 1 # 🏆 真實完成！
+            actual_processed += 1 
 
         except Exception as e:
             err_str = str(e)
@@ -127,11 +124,15 @@ def run_audio_to_stt_mission(sb=None):
                 if '404' in err_str and 'Not Found' in err_str:
                     print(f"🕳️ [{worker_id}] 踩到 404 炸彈！退回物流佇列重新下載！")
                     sb.table("mission_queue").update({"r2_url": None, "scrape_status": "pending"}).eq("id", task_id).execute()
+                else:
+                    # 🚀 API 當機或其他未預期崩潰，一律增加軟失敗，等待下次動態重試
+                    increment_soft_failure(sb, task_id)
             
         finally:
             gc.collect()
+
 # =========================================================
-# ✍️ 第二棒：STT to Summary (指揮官決策層)
+# ✍️ 第二棒：STT to Summary 
 # =========================================================
 def run_stt_to_summary_mission(sb=None):
     start_time = time.time()
@@ -144,7 +145,6 @@ def run_stt_to_summary_mission(sb=None):
     actual_processed = 0
     
     for intel in tasks:
-        # ⏱️ 戰術防線：數量達標，或逼近撤離時間，立刻停止接單！
         if actual_processed >= SUMMARY_LIMIT: 
             print(f"🏁 [{worker_id}] 第二棒已達目標產能 ({SUMMARY_LIMIT} 件)，準備交接。")
             break
@@ -157,7 +157,6 @@ def run_stt_to_summary_mission(sb=None):
         q_data = intel.get('mission_queue') or {}
         r2_file = str(q_data.get('r2_url') or '').lower()
         
-        # 🚀 拔除副檔名防禦：只跳過空包彈，允許 .mp3 等格式進入 Gemini 摘要！
         if not r2_file or r2_file == 'null':
             print(f"⏩ 任務 {q_data.get('episode_title', '')[:10]} 缺乏音檔 (空包彈)，尋找下一筆...")
             continue 
@@ -186,7 +185,7 @@ def run_stt_to_summary_mission(sb=None):
                 update_intel_success(sb, task_id, summary, metrics["score"])
                 
                 print(f"🎉 [{worker_id}] 戰報發送成功，摘要已安全結案！")
-                actual_processed += 1 # 🏆 真實發送戰報！
+                actual_processed += 1 
 
         except Exception as e:
             err_str = str(e)
