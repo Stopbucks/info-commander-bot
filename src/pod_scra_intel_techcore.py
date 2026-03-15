@@ -1,18 +1,27 @@
 # ---------------------------------------------------------
-# 程式碼：src/pod_scra_intel_techcore.py (V5.3 絕對防禦與雷達升級版)
+# 程式碼：src/pod_scra_intel_techcore.py (V5.4 絕對防禦與雷達升級版)
 # 職責：1. 封裝所有 Supabase 複雜查詢 2. 處理二進制檔案下載與編碼
 # 3. 呼叫外部 AI API 4. 發送 Telegram 戰報
 # 特色：用完即丟！將記憶體消耗限制在函式內部，保護 256~512MB 戰機
+# 修正：更新 fetch_stt_tasks 優先挑大檔案、抗崩潰。 檔案+軟失敗=0
 # ---------------------------------------------------------
 import requests, base64, re, gc
 from datetime import datetime
 
-def fetch_stt_tasks(sb, mem_tier, fetch_limit=50):
+def fetch_stt_tasks(sb, mem_tier, worker_id, fetch_limit=50):
     query = sb.table("view_worker_task_inbox").select("*")
+    
     if mem_tier < 512:
-        query = query.or_("r2_url.ilike.%.opus,r2_url.ilike.%.ogg").lt("audio_size_mb", 15).order("audio_size_mb", desc=False)
+        # FLY: 只拿壓縮好的小檔
+        query = query.not_.is_("audio_size_mb", "null").ilike("r2_url", "opt_%").lt("audio_size_mb", 15).order("audio_size_mb", desc=False)
+    elif worker_id in ["RENDER", "KOYEB", "ZEABUR"]:
+        # 🚀 中型機甲的避雷針：只拿 soft_failure_count 為 0 或是 null 的任務！
+        query = query.or_("soft_failure_count.eq.0,soft_failure_count.is.null")
+        query = query.order("audio_size_mb", desc=True, nulls_first=True)
     else:
-        query = query.order("audio_size_mb", desc=True)
+        # 🚜 DBOS/HF 重裝機甲：無視失敗次數，強制接手所有疑難雜症
+        query = query.order("audio_size_mb", desc=True, nulls_first=True)
+        
     return query.limit(fetch_limit).execute().data or []
 
 def fetch_summary_tasks(sb, fetch_limit=50):
