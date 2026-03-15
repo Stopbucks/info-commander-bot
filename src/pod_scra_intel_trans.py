@@ -1,7 +1,8 @@
 # ---------------------------------------------------------
-# 程式碼：src/pod_scra_intel_trans.py  (V5.3 全軍統一狀態機版)
+# 程式碼：src/pod_scra_intel_trans.py  (V5.3 主力通用版)
 # 任務：全軍統一 Tick 狀態機、外部物流下載、拋接異常
-# 修正：拔除寫死的 PROCESS_LIMIT 迴圈，將數量控制權完全交還給 core.py 的控制面板
+# 修正：1. 拔除寫死的 PROCESS_LIMIT 迴圈，將數量控制權完全交還給 core.py。
+# 2. [優化] 強制向下傳遞 sb 連線實例，防止產生資料庫連線殭屍。
 # ---------------------------------------------------------
 import os, requests, time, random, gc, json
 from urllib.parse import urlparse
@@ -9,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 from src.pod_scra_intel_r2 import get_s3_client 
 
 def execute_fortress_stages(sb, config, s_log_func, trigger_intel_func, audio_officers):
+    """【總指揮程序】全軍標準狀態機巡邏流程"""
     now_iso = datetime.now(timezone.utc).isoformat()
     worker_id = config.get("WORKER_ID", "UNKNOWN_NODE")
     
@@ -30,8 +32,6 @@ def execute_fortress_stages(sb, config, s_log_func, trigger_intel_func, audio_of
 
     from src.pod_scra_intel_core import run_audio_to_stt_mission, run_stt_to_summary_mission
 
-    # 🚀 注意：這裡不寫 try...except，讓崩潰直接穿透到 app.py 去通報軟失敗！
-    # 🚀 注意 2：拔除 PROCESS_LIMIT 迴圈，任務數量交由 core.py 面板控制
     if is_duty_officer and current_tick == 1:
         s_log_func(sb, "STATE_M", "INFO", f"{role_name} 執行階段 1/3: 外部走私下載")
         rule_res = sb.table("pod_scra_rules").select("domain").in_("worker_id", [worker_id, "ALL"]).gte("expired_at", now_iso).execute()
@@ -39,12 +39,14 @@ def execute_fortress_stages(sb, config, s_log_func, trigger_intel_func, audio_of
         run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist)
     
     elif current_tick % 2 != 0 or (not is_duty_officer and current_tick == 1):
-        s_log_func(sb, "STATE_M", "INFO", f"{role_name} 啟動轉譯產線 (數量由控制面板接管)")
+        s_log_func(sb, "STATE_M", "INFO", f"{role_name} 啟動轉譯產線 (數量由面板接管)")
         if worker_id in audio_officers:
-            run_audio_to_stt_mission() 
+            # 🚀 關鍵修正：傳入 sb 實例，避免重複連線
+            run_audio_to_stt_mission(sb) 
     else:
-        s_log_func(sb, "STATE_M", "INFO", f"{role_name} 啟動摘要發報 (數量由控制面板接管)")
-        run_stt_to_summary_mission() 
+        s_log_func(sb, "STATE_M", "INFO", f"{role_name} 啟動摘要發報 (數量由面板接管)")
+        # 🚀 關鍵修正：傳入 sb 實例，避免重複連線
+        run_stt_to_summary_mission(sb) 
 
     w_status[tick_key] = current_tick
     health = tactic.get('workers_health', {})
@@ -53,7 +55,7 @@ def execute_fortress_stages(sb, config, s_log_func, trigger_intel_func, audio_of
 
 
 def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
-    """【核心物流引擎】保留您原本的 403 冰封與建檔邏輯"""
+    """【核心物流引擎】保留 403 冰封與建檔邏輯"""
     query = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "success").is_("r2_url", "null").lte("troop2_start_at", now_iso).order("created_at", desc=True).limit(1)
     tasks = query.execute().data or []
     if not tasks: return
