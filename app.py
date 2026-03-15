@@ -1,7 +1,14 @@
 # ---------------------------------------------------------
-# app.py (2026 RENDER/KOYEB V5.1 破冰守衛與軟失敗版)
-# 任務：1. 接口防震 2. 30分鐘破冰守衛 3. 崩潰通報判官 4. 全軍狀態機
+# app.py (V5.3 主力 512MB 輕鬆回訊與非同步防禦版)
+# 適用：RENDER, KOYEB, ZEABUR | 規格：512MB (MEMORY_TIER="512")
+# [任務] 1. 接口防震 (秒回202) 2. 60分破冰守衛 3. 崩潰判官通報 4. 驅動全軍狀態機
+# [機制] 外部呼叫 /ping 時，無論 MISSION_LOCK 是否被佔用，皆立即回傳 202 Accepted。
+# [機制] 拒絕 429 報錯！真正的情報產線會被打包成 Thread，在背景「非同步」默默執行。
+# [守衛] 若背景任務卡死超過 WATCHDOG_TIMEOUT (60分)，下次 ping 將強制擊碎門鎖自救。
+# [修改] 1. 導入 Fire-and-Forget 秒回模式，徹底消除 UptimeRobot 等外部監控的誤報。
+# [修改] 2. 將 MISSION_LOCK 上鎖判定移入背景，確保 Scheduler 與 API 呼叫皆受絕對保護。
 # ---------------------------------------------------------
+
 import os, time, gc, random, threading, traceback
 from datetime import datetime, timezone, timedelta
 from flask import Flask, request
@@ -19,13 +26,14 @@ CONFIG = {
     "CRON_SECRET": os.environ.get("CRON_SECRET")
 }
 
-# 🚀 宣告火力為 512MB 部隊！ & KOYEB 為256MB，進行A/B測試。
+# 🚀 宣告火力為 512MB 主力部隊！
 os.environ["MEMORY_TIER"] = "512"
 
 # 🛡️ 破冰守衛 (Watchdog) 系統配置
 MISSION_LOCK = threading.Lock()
 MISSION_STATE = {"is_running": False, "start_time": 0.0}
-WATCHDOG_TIMEOUT = 3600  # 部隊寬限期：60 分鐘 (1800秒)
+# 搭配 core.py 的 25 分鐘軟撤退，這裡設 60 分鐘作為最後硬防線
+WATCHDOG_TIMEOUT = 3600  
 
 def get_sb(): 
     return create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
@@ -33,13 +41,12 @@ def get_sb():
 def s_log(sb, task_type, status, message, err_stack=None):
     try:
         print(f"[{task_type}][{status}] {message}", flush=True)
-        if status in ["SUCCESS", "ERROR"] or "啟動" in message or "V5.1" in message:
+        if status in ["SUCCESS", "ERROR"] or "啟動" in message or "V5.3" in message:
             sb.table("mission_logs").insert({
                 "worker_id": CONFIG["WORKER_ID"], "task_type": task_type,
                 "status": status, "message": message, "traceback": err_stack
             }).execute()
     except: pass
-
 
 def report_soft_failure(sb, worker_id, error_msg):
     """【系統自救】精準軟失敗通報：嚴格區分主將與後勤兵"""
@@ -53,19 +60,14 @@ def report_soft_failure(sb, worker_id, error_msg):
         current_fails = tactic.get("consecutive_soft_failures", 0)
         
         if worker_id == active_worker:
-            # 🛡️ 情況 A：我是主將。我的崩潰會影響大局，必須累加失敗次數，觸發強制換班！
             sb.table("pod_scra_tactics").update({
                 "consecutive_soft_failures": current_fails + 1,
                 "last_error_type": f"🚨 [主將] {worker_id} 崩潰: {error_msg}"[:200]
             }).eq("id", 1).execute()
             print(f"⚠️ 身為主將，已觸發軟失敗計數 ({current_fails + 1}/3)")
-            
         else:
-            # 🛡️ 情況 B：我是後勤兵。我的崩潰 (如 API 斷線) 不該害主將被換掉！
-            # 將錯誤寫入自己的 worker_status 供備查，並更新佈告欄，但【不增加】失敗計數
             w_status = tactic.get("worker_status", {})
             w_status[f"{worker_id}_last_err"] = str(error_msg)[:100]
-            
             sb.table("pod_scra_tactics").update({
                 "worker_status": w_status,
                 "last_error_type": f"⚠️ [後勤] {worker_id} 局部異常: {error_msg}"[:200]
@@ -75,13 +77,22 @@ def report_soft_failure(sb, worker_id, error_msg):
     except Exception as e: 
         print(f"通報系統本身發生異常: {e}")
 
-
 def run_integrated_mission():
+    """【任務大腦】將鎖定邏輯移入，確保排程與 API 呼叫都受保護"""
     global MISSION_STATE
+    
+    # --- 🚪 嘗試進入主防線 ---
+    if not MISSION_LOCK.acquire(blocking=False):
+        print("🔒 [防線守衛] 機甲正在執行任務，本次呼叫/排程將在背景被忽略。", flush=True)
+        return
+
     sb = get_sb()
+    MISSION_STATE["is_running"] = True
+    MISSION_STATE["start_time"] = time.time()
+    
     try:
         # 🚀 專屬信號彈
-        s_log(sb, "SYSTEM", "SUCCESS", f"🚀 [{CONFIG['WORKER_ID']} V5.1] 輕裝部隊連線，破冰守衛(30m)與自救機制就位！")
+        s_log(sb, "SYSTEM", "SUCCESS", f"🚀 [{CONFIG['WORKER_ID']} V5.3] 主力部隊連線，輕鬆回訊與非同步防禦就位！")
         # 🚀 呼叫全軍統一狀態機
         execute_fortress_stages(sb, CONFIG, s_log, lambda x: None, INTEL_AUDIO_OFFICERS)
         
@@ -98,9 +109,8 @@ def run_integrated_mission():
         del sb; gc.collect()
         print("🏁 [巡邏結束] READY。")
 
-
 @app.route('/')
-def health(): return "OK", 200
+def health(): return f"Fortress {CONFIG['WORKER_ID']} V5.3 Active", 200
 
 @app.route('/ping')
 def trigger():
@@ -109,6 +119,7 @@ def trigger():
     if not token or token != CONFIG['CRON_SECRET']: return "Unauthorized", 401
     
     current_time = time.time()
+    response_msg = "Mission Triggered (Async)"
     
     # --- 🛡️ 破冰守衛：巡視與強制解鎖 ---
     if MISSION_STATE["is_running"]:
@@ -122,18 +133,13 @@ def trigger():
                 try: MISSION_LOCK.release()
                 except: pass
         else:
-            return f"Busy ({elapsed:.0f}s elapsed)", 429
+            # 🚀 輕鬆回訊：如果在忙，直接笑著說 OK 並附上進度，不再報錯 429！
+            return f"Already running ({elapsed:.0f}s elapsed). {response_msg}", 202
 
-    time.sleep(random.uniform(1.0, 3.0))
-
-    # --- 🚪 嘗試進入主防線 ---
-    if not MISSION_LOCK.acquire(blocking=False): return "Locked", 429
-    
-    MISSION_STATE["is_running"] = True
-    MISSION_STATE["start_time"] = time.time()
-    
+    # --- 🚀 非同步啟動：立刻回傳 202 給呼叫者，讓工作在背景執行 ---
     threading.Thread(target=run_integrated_mission, daemon=True).start()
-    return f"Mission Triggered", 202
+    
+    return response_msg, 202
 
 # 內部備用排程器
 scheduler = BackgroundScheduler()
