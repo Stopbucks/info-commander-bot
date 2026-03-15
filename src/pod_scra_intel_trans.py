@@ -12,20 +12,21 @@
 # 修正：1. 徹底拔除 audio_officers 與冗餘的傳入參數，避免呼叫崩潰。
 # 2. 將 max_ticks 交由 src.pod_scra_intel_control 面板動態管理，落實低耦合。
 # ---------------------------------------------------------
+
 import os, requests, time, random, gc, json
 from urllib.parse import urlparse
 from datetime import datetime, timezone, timedelta
 from src.pod_scra_intel_r2 import get_s3_client 
 from src.pod_scra_intel_control import get_tactical_panel # 🚀 引入控制面板
 
-# 🚀 修正：移除 trigger_intel_func 等冗餘參數，防崩潰
 def execute_fortress_stages(sb, config, s_log_func):
     now_iso = datetime.now(timezone.utc).isoformat()
     worker_id = config.get("WORKER_ID", "UNKNOWN_NODE")
     
-    # 🚀 向控制面板請求專屬裝備 (包含 MAX_TICKS)
+    # 向控制面板請求專屬裝備 (包含 MAX_TICKS)
     panel = get_tactical_panel(worker_id)
     
+    # 全局初始 Jitter (模擬機器啟動延遲)
     time.sleep(random.uniform(3.0, 8.0))
     t_res = sb.table("pod_scra_tactics").select("*").eq("id", 1).single().execute()
     if not t_res.data: return
@@ -36,7 +37,7 @@ def execute_fortress_stages(sb, config, s_log_func):
     tick_key = f"{worker_id}_tick"
     current_tick = w_status.get(tick_key, 0) + 1
     
-    # 🚀 修正：不再寫死 3 或 2，由面板決定這台機甲的循環長度
+    # 由面板決定這台機甲的循環長度
     max_ticks = panel.get("MAX_TICKS", 2) 
     if current_tick > max_ticks: current_tick = 1
         
@@ -65,8 +66,8 @@ def execute_fortress_stages(sb, config, s_log_func):
 
 
 def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
-    # (此區塊維持與您提供的一致，無更動)
-    query = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "success").is_("r2_url", "null").lte("troop2_start_at", now_iso).order("created_at", desc=True).limit(1)
+    query = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "success").is_("r2_url", "null").lte("troop2_start_at", now_iso).order("created_at", desc=True)\
+        .limit(1)       # 伺服器下載數量更動
     tasks = query.execute().data or []
     if not tasks: return
     
@@ -75,7 +76,15 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
     worker_id = config.get('WORKER_ID', 'UNKNOWN')
     UAS = ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"]
     
-    for m in tasks:
+    # 🚀 [Jitter 1] 進入外部伺服器前的初步擬人化延遲 (2~5秒)
+    time.sleep(random.uniform(2.0, 5.0))
+    
+    for idx, m in enumerate(tasks):
+        # 🚀 [Jitter 2] 若有多筆任務，在每一筆檔案下載之間加入延遲 (5~12秒)
+        # 註：目前 query.limit(1) 不會觸發此段，但若未來放寬 limit，此處將自動生效！
+        if idx > 0:
+            time.sleep(random.uniform(5.0, 12.0))
+
         f_url = m.get('audio_url')
         if not f_url: continue
         target_domain = urlparse(f_url).netloc
