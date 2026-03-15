@@ -1,14 +1,16 @@
 # ---------------------------------------------------------
-# 程式碼：src/pod_scra_intel_techcore.py (V5.4 RENDER、KOYEB、ZEABUR版)
-# 職責：1. 封裝所有 Supabase 複雜查詢 2. 處理二進制檔案下載與編碼
-# 3. 呼叫外部 AI API 4. 發送 Telegram 戰報
-# 特色：用完即丟！將記憶體消耗限制在函式內部，保護 256~512MB 戰機
-# 修正：1. 實裝軟失敗天花板 (上限6次，毒藥自動隔離)。
-# 2. 依據機器等級 (FLY, 中型, 重裝) 實裝升降冪與容錯揀選邏輯。
+# 程式碼：src/pod_scra_intel_techcore.py (V5.5 雷達與兵器庫版)
+# 職責：1. [雷達] fetch_stt_tasks：依據 mem_tier 與 worker_id 進行動態三級分流。
+#       2. [容錯] increment_soft_failure：處理失敗不墜機，打上標記交接重裝。
+#       3. [火力] 封裝 Supabase 讀寫、AI (Gemini/Groq) 呼叫與 Telegram 戰報。
+# 特色：無狀態、用完即丟！將記憶體消耗限制在函式內部，確保機甲穩定。
 # ---------------------------------------------------------
 import requests, base64, re, gc
 from datetime import datetime
 
+# =========================================================
+# 📡 戰略雷達 (Strategic Radar)
+# =========================================================
 def fetch_stt_tasks(sb, mem_tier, worker_id="UNKNOWN", fetch_limit=50):
     """【低耦合戰略閘道】依據軟失敗次數與檔案大小進行動態三級分流"""
     query = sb.table("view_worker_task_inbox").select("*")
@@ -39,7 +41,6 @@ def fetch_stt_tasks(sb, mem_tier, worker_id="UNKNOWN", fetch_limit=50):
         
     return query.limit(fetch_limit).execute().data or []
 
-# 🚀 新增：極簡的軟失敗推進器
 def increment_soft_failure(sb, task_id):
     """【容錯推進】遇到異常不崩潰，僅增加失敗計數並抹除 R2，讓系統下次動態重試"""
     try:
@@ -54,6 +55,9 @@ def increment_soft_failure(sb, task_id):
     except Exception as e: 
         print(f"⚠️ 容錯推進紀錄失敗: {e}")
 
+# =========================================================
+# 📊 資料庫軍械庫 (Database Armory)
+# =========================================================
 def fetch_summary_tasks(sb, fetch_limit=50):
     return sb.table("mission_intel").select("*, mission_queue(episode_title, source_name, r2_url)").eq("intel_status", "Sum.-pre").order("created_at").limit(fetch_limit).execute().data or []
 
@@ -78,6 +82,17 @@ def delete_intel_task(sb, task_id):
     try: sb.table("mission_intel").delete().eq("task_id", task_id).execute()
     except: pass
 
+def parse_intel_metrics(text):
+    metrics = {"score": 0, "evidence": 0}
+    try:
+        s_match = re.search(r"綜合情報分.*?(\d+)", text)
+        if s_match: metrics["score"] = int(s_match.group(1))
+    except: pass
+    return metrics
+
+# =========================================================
+# 🧠 AI 火控與通訊 (AI & Comms)
+# =========================================================
 def call_groq_stt(secrets, r2_url_path):
     url = f"{secrets['R2_URL']}/{r2_url_path}"
     m_type = "audio/ogg" if ".opus" in url else "audio/mpeg"
@@ -108,14 +123,6 @@ def call_gemini_summary(secrets, r2_url_path, sys_prompt):
         if cands and cands[0].get('content'): return cands[0]['content']['parts'][0].get('text', "")
         return ""
     else: raise Exception(f"Gemini API Error: HTTP {ai_resp.status_code}")
-
-def parse_intel_metrics(text):
-    metrics = {"score": 0, "evidence": 0}
-    try:
-        s_match = re.search(r"綜合情報分.*?(\d+)", text)
-        if s_match: metrics["score"] = int(s_match.group(1))
-    except: pass
-    return metrics
 
 def send_tg_report(secrets, source, title, summary):
     safe_summary = summary[:3800] + ("...\n(因字數限制截斷)" if len(summary) > 3800 else "")

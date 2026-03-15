@@ -1,18 +1,30 @@
 # ---------------------------------------------------------
-# 程式碼：src/pod_scra_intel_trans.py  (V5.3 主力通用版)
-# 任務：全軍統一 Tick 狀態機、外部物流下載、拋接異常
-# 修正：1. 拔除寫死的 PROCESS_LIMIT 迴圈，將數量控制權完全交還給 core.py。
-# 2. [優化] 強制向下傳遞 sb 連線實例，防止產生資料庫連線殭屍。
+# 程式碼：src/pod_scra_intel_trans.py  (V5.5 面板統御防崩潰版)
+# [節拍] 狀態機邏輯：透過 MAX_TICKS 控制循環。若主將設為 3 拍，則依序執行 [1:下載, 2:摘要, 3:轉譯]。
+# [節拍] 判斷公式：利用除以 2 的餘數 (current_tick % 2 != 0) 來動態交替分配任務型態。
+# [節拍] 任務分配：單數拍 (1, 3, 5...) 執行轉譯 (STT)；雙數拍 (2, 4, 6...) 執行摘要 (Summary)。
+
+# [主將範例] FLY 為主將 (MAX=12)：僅在「第 1 拍」出門抓音檔，第 2~12 拍交替做摘要與轉譯 (低頻進貨)。
+# [主將範例] RENDER 為主將 (MAX=6)：同樣在「第 1 拍」抓音檔，第 2~6 拍做摘要與轉譯 (高頻進貨)。
+# [後勤範例] 若身分為「後勤兵」：完全不管 MAX 是多少，【永遠不出門抓檔】，只專心交替做轉譯與摘要。
+# [節拍總結] MAX_TICKS 的大小，實質上決定了「主將多久出門進貨一次」的冷卻週期。
+
+# 修正：1. 徹底拔除 audio_officers 與冗餘的傳入參數，避免呼叫崩潰。
+# 2. 將 max_ticks 交由 src.pod_scra_intel_control 面板動態管理，落實低耦合。
 # ---------------------------------------------------------
 import os, requests, time, random, gc, json
 from urllib.parse import urlparse
 from datetime import datetime, timezone, timedelta
 from src.pod_scra_intel_r2 import get_s3_client 
+from src.pod_scra_intel_control import get_tactical_panel # 🚀 引入控制面板
 
-def execute_fortress_stages(sb, config, s_log_func, trigger_intel_func, audio_officers):
-    """【總指揮程序】全軍標準狀態機巡邏流程"""
+# 🚀 修正：移除 trigger_intel_func 等冗餘參數，防崩潰
+def execute_fortress_stages(sb, config, s_log_func):
     now_iso = datetime.now(timezone.utc).isoformat()
     worker_id = config.get("WORKER_ID", "UNKNOWN_NODE")
+    
+    # 🚀 向控制面板請求專屬裝備 (包含 MAX_TICKS)
+    panel = get_tactical_panel(worker_id)
     
     time.sleep(random.uniform(3.0, 8.0))
     t_res = sb.table("pod_scra_tactics").select("*").eq("id", 1).single().execute()
@@ -24,7 +36,8 @@ def execute_fortress_stages(sb, config, s_log_func, trigger_intel_func, audio_of
     tick_key = f"{worker_id}_tick"
     current_tick = w_status.get(tick_key, 0) + 1
     
-    max_ticks = 3 if is_duty_officer else 2
+    # 🚀 修正：不再寫死 3 或 2，由面板決定這台機甲的循環長度
+    max_ticks = panel.get("MAX_TICKS", 2) 
     if current_tick > max_ticks: current_tick = 1
         
     role_name = "👑 值勤官" if is_duty_officer else "🛠️ 後勤兵"
@@ -39,13 +52,10 @@ def execute_fortress_stages(sb, config, s_log_func, trigger_intel_func, audio_of
         run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist)
     
     elif current_tick % 2 != 0 or (not is_duty_officer and current_tick == 1):
-        s_log_func(sb, "STATE_M", "INFO", f"{role_name} 啟動轉譯產線 (數量由面板接管)")
-        if worker_id in audio_officers:
-            # 🚀 關鍵修正：傳入 sb 實例，避免重複連線
-            run_audio_to_stt_mission(sb) 
+        s_log_func(sb, "STATE_M", "INFO", f"{role_name} 啟動轉譯產線 (由面板接管)")
+        run_audio_to_stt_mission(sb) 
     else:
-        s_log_func(sb, "STATE_M", "INFO", f"{role_name} 啟動摘要發報 (數量由面板接管)")
-        # 🚀 關鍵修正：傳入 sb 實例，避免重複連線
+        s_log_func(sb, "STATE_M", "INFO", f"{role_name} 啟動摘要發報 (由面板接管)")
         run_stt_to_summary_mission(sb) 
 
     w_status[tick_key] = current_tick
@@ -55,7 +65,7 @@ def execute_fortress_stages(sb, config, s_log_func, trigger_intel_func, audio_of
 
 
 def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
-    """【核心物流引擎】保留 403 冰封與建檔邏輯"""
+    # (此區塊維持與您提供的一致，無更動)
     query = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "success").is_("r2_url", "null").lte("troop2_start_at", now_iso).order("created_at", desc=True).limit(1)
     tasks = query.execute().data or []
     if not tasks: return
@@ -63,7 +73,6 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
     s3 = get_s3_client()
     bucket = os.environ.get("R2_BUCKET_NAME")
     worker_id = config.get('WORKER_ID', 'UNKNOWN')
-    
     UAS = ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"]
     
     for m in tasks:
@@ -91,7 +100,6 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
                 s_log_func(sb, "DOWNLOAD", "ERROR", f"🚫 [{worker_id}] 遭封鎖 ({he.response.status_code})")
                 victim_freeze = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
                 ally_freeze = (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat()
-                
                 sb.table("pod_scra_rules").insert([
                     {"worker_id": worker_id, "domain": target_domain, "rule_type": "AUTO_COOLDOWN", "expired_at": victim_freeze},
                     {"worker_id": "ALL", "domain": target_domain, "rule_type": "VIGILANCE", "expired_at": ally_freeze}
