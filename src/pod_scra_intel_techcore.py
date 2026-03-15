@@ -30,14 +30,14 @@ def fetch_stt_tasks(sb, mem_tier, worker_id="UNKNOWN", fetch_limit=50):
         # 🚜 重裝巨獸 (HF / DBOS)：無差別碾壓
         # 條件：完全無視軟失敗次數 (受天花板保護即可)
         # 排序：檔案由大至小 (降冪 desc=True)，優先處理 null (剛載好還沒測大小的原始檔)
-        query = query.order("audio_size_mb", desc=True, nulls_first=True)
+        query = query.order("audio_size_mb", desc=True, nullsfirst=True)
                      
     else:
         # 🛡️ 中型部隊 (RENDER / KOYEB / ZEABUR)：穩健推進
         # 排序一：軟失敗次數由少至多 (升冪 desc=False)，優先處理健康的 (null/0 -> 1 -> 2)
         # 排序二：同次數下，檔案由大至小 (降冪 desc=True)
-        query = query.order("soft_failure_count", desc=False, nulls_first=True) \
-                     .order("audio_size_mb", desc=True, nulls_first=True)
+        query = query.order("soft_failure_count", desc=False, nullsfirst=True) \
+                     .order("audio_size_mb", desc=True, nullsfirst=True)
         
     return query.limit(fetch_limit).execute().data or []
 
