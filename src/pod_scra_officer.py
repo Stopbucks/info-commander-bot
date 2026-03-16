@@ -12,7 +12,7 @@ from supabase import create_client, Client
 from bs4 import BeautifulSoup
 from pod_scra_scanner import fetch_html
 
-ACTIVE_STRATEGY = 1 
+ACTIVE_STRATEGY = 3 
 STRATEGY_MAP = {
     1: {"provider": "SCRAPERAPI", "label": "Win11_Chrome_Premium", "key_name": "SCRAP_API_KEY_V2"},
     5: {"provider": "SCRAPINGANT", "label": "Win11_Chrome_Ant", "key_name": "SCRAPINGANT_API_KEY"}
