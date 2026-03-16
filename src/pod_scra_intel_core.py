@@ -1,11 +1,12 @@
 # ---------------------------------------------------------
-# src/pod_scra_intel_core.py v5.5 (全軍單一純粹流程版)
+# src/pod_scra_intel_core.py v5.6 (兵工廠與 Jitter 防踩踏版)
 # 適用部隊：ALL (FLY, RENDER, KOYEB, ZEABUR, DBOS, HF)
 # 任務：專注於 STT 與 Summary 的核心戰鬥流程。
-# 架構突破：完全剝離控制面板與連線設定，移至 src.pod_scra_intel_control
+# [新增] 1. COMPRESS_ONLY 兵工廠：壓縮完直接結案。若遇已壓縮檔則自動化身轉譯兵。
+# [新增] 2. 迴圈 Jitter 雜訊：在多檔案處理間加入隨機延遲，防止 API 封鎖與併發衝突。
 # ---------------------------------------------------------
 import os, time, random, gc
-from src.pod_scra_intel_control import get_tactical_panel, get_sb, get_secrets # 🚀 引入外部指揮所
+from src.pod_scra_intel_control import get_tactical_panel, get_sb, get_secrets 
 from src.pod_scra_intel_r2 import compress_task_to_opus  
 from src.pod_scra_intel_groqcore import GroqFallbackAgent
 from src.pod_scra_intel_techcore import (
@@ -22,7 +23,7 @@ def run_audio_to_stt_mission(sb=None):
     start_time = time.time()
     worker_id = os.environ.get("WORKER_ID", "UNKNOWN_NODE")
     
-    # 🚀 向指揮所申請專屬戰術面板
+    # 向指揮所申請專屬戰術面板
     panel = get_tactical_panel(worker_id)
     
     if panel["STT_LIMIT"] <= 0:
@@ -50,9 +51,19 @@ def run_audio_to_stt_mission(sb=None):
             print(f"⏱️ [{worker_id}] 巡邏逼近安全極限 ({panel['SAFE_DURATION_SECONDS']}s)，強制撤退！")
             break
 
+        # 🚀 [Jitter 雜訊] 迴圈內第二筆開始，加入擬人化隨機延遲
+        if actual_processed > 0:
+            delay = random.uniform(2.0, 5.0)
+            print(f"⏳ [{worker_id}] 戰術冷卻 {delay:.1f} 秒...")
+            time.sleep(delay)
+
         task_id = task['id']
         r2_url = str(task.get('r2_url') or '').lower()
         
+        # 🔄 [動態兵工廠] 如果這台是專職壓縮，但遇到已經是 opus 的檔案，代表無檔可壓！自動放行往下轉譯
+        if panel.get("COMPRESS_ONLY") and r2_url.endswith('.opus'):
+            print(f"🔄 [{worker_id}] 兵工廠產能閒置：自動轉職為【中型主力】支援 AI 轉譯！")
+
         check = sb.table("mission_intel").select("intel_status").eq("task_id", task_id).execute()
         if check.data:
             print(f"⏩ 任務 {task.get('source_name')} 已存在，尋找下一筆...")
@@ -61,15 +72,22 @@ def run_audio_to_stt_mission(sb=None):
         print(f"🎯 [{worker_id}] 鎖定目標: {task.get('source_name')} (大小: {task.get('audio_size_mb')}MB)")
 
         try:
-            # 🚀 根據面板權限決定是否壓縮
+            # 根據面板權限決定是否壓縮
             if panel["CAN_COMPRESS"] and (r2_url.endswith('.mp3') or r2_url.endswith('.m4a')):
                 print(f"⚙️ [{worker_id}] 面板授權壓縮！啟動 FFmpeg 引擎...")
                 success, new_url = compress_task_to_opus(task_id, task['r2_url'])
                 if success:
-                    print(f"✅ [{worker_id}] 壓縮成功: {new_url}，接續進入 AI 轉譯！")
+                    print(f"✅ [{worker_id}] 壓縮成功: {new_url}！")
                     sb.table("mission_queue").update({"r2_url": new_url, "audio_ext": ".opus", "audio_size_mb": 5}).eq("id", task_id).execute()
                     r2_url = new_url.lower()
                     task['r2_url'] = new_url
+                    
+                    # 🏭 [兵工廠攔截] 壓縮完畢後，若為純壓縮職位，立即跳出結案
+                    if panel.get("COMPRESS_ONLY"):
+                        print(f"🏭 [{worker_id}] 兵工廠任務完成！檔案已入庫，交由輕裝部隊轉譯。")
+                        actual_processed += 1
+                        continue 
+                        
                 else:
                     print(f"❌ [{worker_id}] 壓縮失敗，觸發容錯推進！")
                     increment_soft_failure(sb, task_id)
@@ -116,7 +134,6 @@ def run_stt_to_summary_mission(sb=None):
     start_time = time.time()
     worker_id = os.environ.get("WORKER_ID", "UNKNOWN_NODE")
     
-    # 🚀 向指揮所申請專屬戰術面板
     panel = get_tactical_panel(worker_id)
     
     if panel["SUMMARY_LIMIT"] <= 0:
@@ -138,6 +155,12 @@ def run_stt_to_summary_mission(sb=None):
             print(f"⏱️ [{worker_id}] 摘要產線逼近安全極限 ({panel['SAFE_DURATION_SECONDS']}s)，強制撤退！")
             break
             
+        # 🚀 [Jitter 雜訊] 摘要產線加入隨機延遲，降低 429 Rate Limit 風險
+        if actual_processed > 0:
+            delay = random.uniform(3.0, 6.0)
+            print(f"⏳ [{worker_id}] 戰術冷卻 {delay:.1f} 秒...")
+            time.sleep(delay)
+
         task_id = intel['task_id']
         provider = intel['ai_provider']
         q_data = intel.get('mission_queue') or {}
