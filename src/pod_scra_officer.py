@@ -1,9 +1,10 @@
 # ---------------------------------------------------------
 # 本程式碼：src/pod_scra_officer.py v10.2  (GITHUB 專用)
-# 任務：1. 偵查 2新+1舊 2. 失敗日誌回填(JSONB) 3. RSS 優先 4. 戰場清理
+# 任務：1. 偵查 6新+2舊 2. 失敗日誌回填(JSONB) 3. RSS 優先 4. 戰場清理
 # [v10.2 升級] 1. 自動啟動留白的節目 (is_active 補齊)
 # [v10.2 升級] 2. RSS 絕對霸權：有 RSS 則絕對不走 HTML，失敗直接寫入日誌。
 # [v10.2 升級] 3. 攔截無效 Slug：遇到空值或純數字 Slug 拒絕出兵，阻絕 404 資源浪費。
+# [戰術調整] 擴編偵察裝備庫 (1~5號)，切換至 2 號裝備，並將偵察火力提升至 6新+2舊。
 # ---------------------------------------------------------
 import os, requests, time, re, json, random, feedparser
 from urllib.parse import urlparse 
@@ -12,9 +13,20 @@ from supabase import create_client, Client
 from bs4 import BeautifulSoup
 from pod_scra_scanner import fetch_html
 
-ACTIVE_STRATEGY = 3 
+# =========================================================
+# 🎯 [戰術裝備庫] HTML 攻堅破防 API 配置表 (USAGE)
+# 1. SCRAPERAPI  : [主力部隊] 強制開啟渲染與高級住宅代理。(⚠️目前額度已耗盡)
+# 2. WEBSCRAPING : [轉運專員] 強化轉址處理。擁有豐沛偵察點數，每月自動回補。(👉 目前啟用)
+# 3. SCRAPEDO    : [備援破城槌] 快速渲染衝鋒，輕量且快速的突擊武力。
+# 4. HASDATA     : [特種部隊] 最強住宅代理，專攻 Cloudflare 高防禦目標。
+# 5. SCRAPINGANT : [通用步兵] 穩定渲染，常規備用軍力，中規中矩。
+# =========================================================
+ACTIVE_STRATEGY = 2 
 STRATEGY_MAP = {
     1: {"provider": "SCRAPERAPI", "label": "Win11_Chrome_Premium", "key_name": "SCRAP_API_KEY_V2"},
+    2: {"provider": "WEBSCRAPING", "label": "Win11_Chrome_WebScraping", "key_name": "WEBSCRAPING_API_KEY"},
+    3: {"provider": "SCRAPEDO", "label": "Win11_Chrome_ScrapeDo", "key_name": "SCRAPEDO_API_KEY"},
+    4: {"provider": "HASDATA", "label": "Win11_Chrome_HasData", "key_name": "HASDATA_API_KEY"},
     5: {"provider": "SCRAPINGANT", "label": "Win11_Chrome_Ant", "key_name": "SCRAPINGANT_API_KEY"}
 }
 
@@ -83,7 +95,7 @@ def run_scra_officer():
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
     
-    print(f"🚀 [解碼官 v10.2] 啟動黑盒子監測掃描...")
+    print(f"🚀 [解碼官 v10.2] 啟動黑盒子監測掃描... 目前啟用戰術: {ACTIVE_STRATEGY} ({provider})")
 
     # 🧹 [自動防呆] 掃描留白的 is_active 並自動啟用
     try:
@@ -95,7 +107,6 @@ def run_scra_officer():
     sources = sb.table("mission_program_master").select("*").eq("is_active", True).execute().data
     
     for s in sources:
-        # 防呆：沒填 RSS 網址的節目直接跳過
         if not s.get("rss_feed_url"): continue
 
         try:
@@ -115,7 +126,7 @@ def run_scra_officer():
                             "source_name": s["program_name"],
                             "audio_url": audio_url,
                             "episode_title": entry.title[:100],
-                            "podbay_slug": s.get("podbay_slug"), # 允許為空
+                            "podbay_slug": s.get("podbay_slug"), 
                             "scrape_status": "success",     
                             "used_provider": "RSS_STRIKE",
                             "assigned_troop": "T2",         
@@ -129,7 +140,6 @@ def run_scra_officer():
                         status_msg = f"✅ 已發送物流" if not meta["skip_reason"] else f"🛑 海關攔截 ({meta['skip_reason']})"
                         print(f"{status_msg}: {s['program_name']}")
 
-            # 更新 master 簽到
             sb.table("mission_program_master").update({"last_checked_at": now_iso}).eq("podbay_slug", s["podbay_slug"]).execute()
             
         except Exception as e:
@@ -138,10 +148,13 @@ def run_scra_officer():
 
     # === ⚡ 任務二：補漏偵察 (HTML 攻堅並紀錄失敗) ===
     print(f"\n🔦 [攻堅模組] 兵種: {persona_label} | 開始處理到期任務...")
+    
+    # 🔍 [偵察數量設定]：6 筆新任務 + 2 筆舊任務 (因點數豐沛，恢復第一線高強度偵察)
     new_m = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "pending").lte("troop2_start_at", now_iso)\
             .order("created_at", desc=True).limit(6).execute()
     old_m = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "pending").lte("troop2_start_at", now_iso)\
             .order("created_at", desc=False).limit(2).execute()
+    
     all_missions = (new_m.data or []) + (old_m.data or [])
 
     for m in all_missions:
@@ -166,7 +179,6 @@ def run_scra_officer():
                         print(f"✅ [秒殺] RSS 協議捕獲成功！")
                         continue
                 
-                # 如果 RSS 沒找到該集數
                 log_recon_failure(sb, task_id, "RSS_STRIKE", source_name, "RSS_ENTRY_NOT_FOUND")
                 print(f"⚠️ [RSS 落空] {source_name} - {title[:20]}... 禁止降級至 HTML 攻堅。")
             except Exception as e:
@@ -198,7 +210,7 @@ def run_scra_officer():
                 for a in soup.find_all('a', href=True):
                     hrf, txt = a['href'].lower(), a.get_text().upper()
                     if not f_audio and ('DOWNLOAD' in txt or 'MP3' in txt) and \
-                       any(k in hrf for k in ['podtrac', 'megaphone', 'pdst', 'pscrb']):
+                        any(k in hrf for k in ['podtrac', 'megaphone', 'pdst', 'pscrb']):
                         f_audio = a['href']
                     if any(key in txt for key in ['RSS', 'FEED']) and 'podbay.fm' not in hrf:
                         f_rss = a['href']
@@ -244,22 +256,17 @@ def run_scra_officer():
             print(f"💥 HTML 攻堅異常: {e}")
 
     # =========================================================
-    # ⚡ 任務五：Supabase 倉庫清理 (17 天舊物資)
+    # ⚡ 任務五：Supabase 資料庫垃圾清運 (17 天舊物資紀錄)
+    # [評估結論] 必須保留！R2 清理的是「實體音檔」，此處清理的是「資料庫文字紀錄」。
+    # 若不清理，mission_queue 會無限膨脹拖垮查詢效能。
     # =========================================================
     print("\n🧹 [清理員] 啟動戰場掃除...")
     try:
         seventeen_days_ago = (now - timedelta(days=17)).isoformat()
         sb.table("mission_queue").delete().lt("created_at", seventeen_days_ago).execute()
-        print("✅ 清理完成：17天前的舊任務已移除。")
+        print("✅ 清理完成：17天前的舊任務紀錄已自資料庫移除。")
     except Exception as e:
         print(f"⚠️ 清理失敗: {e}")
 
 if __name__ == "__main__":
     run_scra_officer()
-
-        # ---------------------------------------------------------
-        # 🛡️ 補充：部隊 1 & 2 下載任務自適性緩衝計算 (Adaptive Buffer Logic)
-        #    目前戰術判斷，由supabase 欄位第一時間偵查填入後，直接判斷。
-        # D: 部隊二接手天數 (Transfer Threshold)
-        # F: 節目更新頻率 (Frequency in Days)  公式設計：D = 1.5F + 2
-        # ---------------------------------------------------------
