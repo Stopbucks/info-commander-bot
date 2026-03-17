@@ -1,7 +1,12 @@
-
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_transport.py v3.5 (二代大腦備援版)
+# 本程式碼：src/pod_scra_transport.py v3.6 ( T1部隊 二代大腦備援版)
 # 任務：1. 避開新產線任務 2. AI 提煉 (Gemini 2.5) 3. 寫入新版 mission_intel 
+# [工作流程] 掃描已下載(completed)且具備實體檔案的 T2 任務，接手提煉摘要。
+# [工作流程] 發現任務正由主產線 (Sum.-proc/pre/ready) 處理時，自動執行戰術退讓。
+# [任務定位] 擔任 T2 產線的終極後備軍，確保物資入庫後絕對不會因為主節點異常而卡死。
+# [版本修正] 1. 修復 pending_intel 迴圈邏輯漏洞，確保有效過濾並承接無紀錄任務。
+# [版本修正] 2. 新增 assigned_troop == "T2" 防線，嚴格遵守雙軌分流，絕不誤觸 T1 專屬物資。
+# [版本修正] 3. 新增 r2_url 實體檔案校驗，避免處理未確實上傳的幽靈資料。
 # ---------------------------------------------------------
 import os, requests, time, random, boto3, subprocess, json, re
 from datetime import datetime, timezone
@@ -46,32 +51,42 @@ def run_transport_and_report():
     s3 = boto3.client('s3', endpoint_url=f'https://{r2_acc}.r2.cloudflarestorage.com',
                       aws_access_key_id=r2_id, aws_secret_access_key=r2_secret, region_name='auto')
 
-    # 🎯 篩選：已完成下載 (completed) 且按時間降序
+    # 🎯 篩選：已完成下載 (completed) 且擁有實體檔案 (r2_url 不為空) 且屬於 T2 產線的任務，按時間降序
     res = sb.table("mission_queue").select("id, r2_url, episode_title, source_name, audio_url")\
-            .eq("scrape_status", "completed").order("created_at", desc=True).limit(20).execute()
+            .eq("scrape_status", "completed")\
+            .neq("r2_url", "null")\
+            .eq("assigned_troop", "T2")\
+            .order("created_at", desc=True).limit(20).execute()
     
     pending_intel = []
     for m in res.data:
+        # 防呆：避免處理到沒有網址的無效紀錄
+        if not m.get('r2_url'): continue
+            
         # 🕵️ [關鍵排他判定]：檢查情報表狀態
         check = sb.table("mission_intel").select("id, intel_status").eq("task_id", m['id']).execute()
         
-        # 1. 若完全無紀錄：GHA 獲准介入
+        # 1. 若完全無紀錄：代表主產線連 STT 都還沒跑完，GHA 獲准介入
         if not check.data:
             pending_intel.append(m)
+            
         else:
             status = check.data[0].get('intel_status')
-            # 2. 若狀態為 proc, pre, ready：代表新產線 (Zeabur/Koyeb) 正在作業中，GHA 必須保持靜默撤退
+            # 2. 若狀態為 proc, pre, ready：代表新產線 (Zeabur/Koyeb) 正在作業中，GHA 必須保持靜默退讓
             if status in ["Sum.-proc", "Sum.-pre", "Sum.-ready"]:
                 print(f"🛌 [身分：{MY_ID}] 任務 {m['id'][:8]} 正由新產線處理，GHA 執行戰術退讓。")
-                continue
-            # 3. 若已發送 (Sum.-sent) 或已歸檔 (Sum.-archived)：直接跳過
-            else:
+            
+            # 3. 若已發送或歸檔：也跳過
+            elif status in ["Sum.-sent", "Sum.-archived"]:
                 continue
                 
-        if len(pending_intel) >= INTEL_LIMIT: break
+        # 🚀 達到收集上限就提早結束迴圈
+        if len(pending_intel) >= INTEL_LIMIT: 
+            break
 
     if not pending_intel:
-        print("☕ [情報部] 戰場任務皆已由主產線佔領或完成。"); return
+        print("☕ [情報部] 戰場任務皆已由主產線佔領或完成。")
+        return
 
     print(f"📦 [備援啟動] 發現 {len(pending_intel)} 筆漏網之魚，GHA 開始提煉。")
 

@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# 程式碼：src/pod_scra_intel_trans.py  (V5.5 面板統御防崩潰版)
+# 程式碼：src/pod_scra_intel_trans.py  (V5.6 面板統御防崩潰版)
 # [節拍] 狀態機邏輯：透過 MAX_TICKS 控制循環。若主將設為 3 拍，則依序執行 [1:下載, 2:摘要, 3:轉譯]。
 # [節拍] 判斷公式：利用除以 2 的餘數 (current_tick % 2 != 0) 來動態交替分配任務型態。
 # [節拍] 任務分配：單數拍 (1, 3, 5...) 執行轉譯 (STT)；雙數拍 (2, 4, 6...) 執行摘要 (Summary)。
@@ -11,6 +11,8 @@
 
 # 修正：1. 徹底拔除 audio_officers 與冗餘的傳入參數，避免呼叫崩潰。
 # 2. 將 max_ticks 交由 src.pod_scra_intel_control 面板動態管理，落實低耦合。
+# 3. [T2 敗戰轉移] 遭遇 403/401 封鎖時，自動將任務降級為 pending 並標記 T1_RESCUE。
+# 4. [黃金救援期] 推遲 troop2_start_at 7 天，完美錯開 T2 雷達，精準移交 T1 數位人格處理。
 # ---------------------------------------------------------
 
 import os, requests, time, random, gc, json
@@ -105,16 +107,28 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
             s_log_func(sb, "DOWNLOAD", "SUCCESS", f"✅ 物資入庫: {m['id'][:8]}")
             
         except requests.exceptions.HTTPError as he:
-            if he.response.status_code in [403, 401, 429]:
-                s_log_func(sb, "DOWNLOAD", "ERROR", f"🚫 [{worker_id}] 遭封鎖 ({he.response.status_code})")
+            status_code = he.response.status_code
+            if status_code in [403, 401, 429]:
+                s_log_func(sb, "DOWNLOAD", "ERROR", f"🚫 [{worker_id}] 遭封鎖 ({status_code})，呼叫 T1 特種救援！")
+                
+                # 1. 網域黑名單 (維持原有邏輯，避免 T2 友軍去送死)
                 victim_freeze = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
                 ally_freeze = (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat()
                 sb.table("pod_scra_rules").insert([
                     {"worker_id": worker_id, "domain": target_domain, "rule_type": "AUTO_COOLDOWN", "expired_at": victim_freeze},
                     {"worker_id": "ALL", "domain": target_domain, "rule_type": "VIGILANCE", "expired_at": ally_freeze}
                 ]).execute()
+
+                # 2. 🚀 【戰略轉移】將燙手山芋交給 T1，並爭取 7 天黃金救援期
+                rescue_time = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+                sb.table("mission_queue").update({
+                    "assigned_troop": "T1_RESCUE",    # 🏷️ 貼上特殊救援標籤，標明這是 T1 專屬
+                    "troop2_start_at": rescue_time,   # ⏳ 沒收 T2 開火權，推遲到 7 天後
+                    "scrape_status": "pending"        # 🔄 狀態降級為待命，讓 T1 雷達能順利鎖定
+                }).eq("id", m['id']).execute()
+                
             else:
-                s_log_func(sb, "DOWNLOAD", "ERROR", f"❌ 搬運異常: {he.response.status_code}")
+                s_log_func(sb, "DOWNLOAD", "ERROR", f"❌ 搬運異常: {status_code}")
         except Exception as e: 
             s_log_func(sb, "DOWNLOAD", "ERROR", f"❌ 搬運失敗: {str(e)}")
         finally:

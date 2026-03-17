@@ -5,6 +5,8 @@
 # [v10.2 升級] 2. RSS 絕對霸權：有 RSS 則絕對不走 HTML，失敗直接寫入日誌。
 # [v10.2 升級] 3. 攔截無效 Slug：遇到空值或純數字 Slug 拒絕出兵，阻絕 404 資源浪費。
 # [戰術調整] 擴編偵察裝備庫 (1~5號)，切換至 2 號裝備，並將偵察火力提升至 6新+2舊。
+# [戰術校準] 動態兵力指派：依據節目的 wait_days 設定，大於 0 天交由 T1 處理，否則由 T2 即時打擊。
+# [黃金沉澱] T1 任務自動推遲 troop2_start_at 開火時間，完美實現 T1 延遲與 T2 即時的雙軌分流。
 # ---------------------------------------------------------
 import os, requests, time, re, json, random, feedparser
 from urllib.parse import urlparse 
@@ -122,6 +124,11 @@ def run_scra_officer():
                         print(f"🔎 發現新物資: {s['program_name']}，執行海關核驗...")
                         meta = probe_audio_metadata(audio_url)
                         
+                        # 🚀 [戰略校準] 計算精準的部隊開火時間與標籤
+                        wait_days = s.get("wait_days") or 0
+                        t2_start = (now + timedelta(days=wait_days)).isoformat()
+                        assigned = "T1" if wait_days > 0 else "T2"
+
                         payload = {
                             "source_name": s["program_name"],
                             "audio_url": audio_url,
@@ -129,8 +136,8 @@ def run_scra_officer():
                             "podbay_slug": s.get("podbay_slug"), 
                             "scrape_status": "success",     
                             "used_provider": "RSS_STRIKE",
-                            "assigned_troop": "T2",         
-                            "troop2_start_at": now_iso,     
+                            "assigned_troop": assigned,     # 👈 動態指派 T1 或 T2
+                            "troop2_start_at": t2_start,    # 👈 加上等待天數的未來時間
                             "audio_size_mb": meta["size_mb"],
                             "audio_ext": meta["ext"],
                             "skip_reason": meta["skip_reason"] 
@@ -222,16 +229,24 @@ def run_scra_officer():
 
                 if f_audio:
                     meta = probe_audio_metadata(f_audio) 
+                    
+                    # 🚀 [戰略校準] HTML 攻堅也必須遵守等待天數規則
+                    wait_days = master.get("wait_days") if master else 0
+                    t2_start = (now + timedelta(days=wait_days)).isoformat()
+                    assigned = "T1" if wait_days > 0 else "T2"
+
                     upd.update({
                         "audio_url": f_audio, 
                         "scrape_status": "success", 
                         "used_provider": f"{provider}_FISHER",
+                        "assigned_troop": assigned,         # 👈 動態指派 T1 或 T2
+                        "troop2_start_at": t2_start,        # 👈 加上等待天數的未來時間
                         "audio_size_mb": meta["size_mb"], 
                         "audio_ext": meta["ext"],          
                         "skip_reason": meta["skip_reason"] 
                     })
                     sb.table("mission_queue").update(upd).eq("id", task_id).execute()
-                    print(f"✅ [結案] HTML 偵察完畢。規格: {meta['size_mb']}MB")  
+                    print(f"✅ [結案] HTML 偵察完畢。指派: {assigned} | 規格: {meta['size_mb']}MB")
                 else:
                     log_recon_failure(sb, task_id, provider, source_name, "AUDIO_NOT_FOUND_ON_PAGE")
                     sb.table("mission_queue").update(upd).eq("id", task_id).execute()

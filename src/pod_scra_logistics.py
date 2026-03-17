@@ -1,8 +1,9 @@
 
-
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_logistics.py v7.0 (特種武裝版)
-# 任務：1. 僅下載 T2 通行證任務 2. 403 檢舉與規避 3. 擬人化偽裝
+# 本程式碼：src/pod_scra_logistics.py v7.2 (雙軌救援特種武裝版)
+# 任務：1. 雙軌下載：常規 T2 支援 + T1_RESCUE 403 破門救援
+#       2. 403 檢舉與規避 3. 擬人化偽裝
+# [v7.2 升級] 加入對 assigned_troop == 'T1_RESCUE' 的優先強制接管邏輯。
 # ---------------------------------------------------------
 import os, time, random, requests, boto3, subprocess, json
 from datetime import datetime, timezone, timedelta
@@ -16,7 +17,6 @@ def get_s3():
                         aws_access_key_id=get_secret("R2_ACCESS_KEY_ID"),
                         aws_secret_access_key=get_secret("R2_SECRET_ACCESS_KEY"), region_name="auto")
 
-# 🎖️ 新增：擬人化偽裝標頭
 def get_headers():
     ua_list = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -42,24 +42,28 @@ def run_logistics_mission():
     rule_res = sb.table("pod_scra_rules").select("domain").eq("worker_id", "GITHUB_LOGISTICS").execute()
     my_blacklist = [r['domain'] for r in rule_res.data] if rule_res.data else []
 
-    # 1. 領取 T2 任務 (排除 T1 禁運品)
-    query_base = sb.table("mission_queue").select("*")\
-                   .eq("scrape_status", "success")\
-                   .eq("status", "pending")\
-                   .eq("assigned_troop", "T2")\
-                   .lte("troop2_start_at", now_iso)
+    # 🚀 雙軌查詢邏輯 (Dual Track)
+    # 軌道 A: [特種救援] 優先攔截被 T2 退貨的 T1_RESCUE 任務 (無視 troop2_start_at 時間限制)
+    rescue_query = sb.table("mission_queue").select("*")\
+                   .eq("scrape_status", "pending")\
+                   .eq("assigned_troop", "T1_RESCUE")\
+                   .order("created_at", desc=False).limit(2).execute()
     
-    new_res = query_base.order("created_at", desc=True).limit(NEW_LIMIT).execute()
-    excluded = [t['id'] for t in new_res.data] if new_res.data else []
-    old_res = query_base.not_.in_("id", excluded).order("created_at", desc=False).limit(OLD_LIMIT).execute()
+    # 軌道 B: [常規支援] 撿取 T2 未處理的舊任務
+    regular_query = sb.table("mission_queue").select("*")\
+                    .eq("scrape_status", "success")\
+                    .eq("assigned_troop", "T2")\
+                    .lte("troop2_start_at", now_iso)\
+                    .order("created_at", desc=False).limit(OLD_LIMIT).execute()
     
-    download_list = (new_res.data or []) + (old_res.data or [])
+    download_list = (rescue_query.data or []) + (regular_query.data or [])
 
     if download_list:
-        print(f"🚛 [物流啟動] 準備搬運 {len(download_list)} 筆 T2 物資...")
+        print(f"🚛 [物流啟動] 準備搬運 {len(download_list)} 筆物資 (包含特種救援)...")
         for idx, task in enumerate(download_list):
             task_id, audio_url = task['id'], task['audio_url']
             target_domain = urlparse(audio_url).netloc
+            troop_type = task.get("assigned_troop", "UNKNOWN")
             
             # 🛡️ 戰術規避
             if any(b in target_domain for b in my_blacklist):
@@ -67,6 +71,7 @@ def run_logistics_mission():
                 continue
 
             try:
+                print(f"🎯 [鎖定] 任務類型: {troop_type} | 來源: {target_domain}")
                 file_name = f"{datetime.now().strftime('%Y%m%d')}_{task_id[:8]}.opus"
                 raw_path, opus_path = f"/tmp/raw_{task_id}", f"/tmp/{file_name}"
                 
@@ -78,15 +83,14 @@ def run_logistics_mission():
                 
                 if compress_audio(raw_path, opus_path):
                     s3.upload_file(opus_path, bucket, file_name)
+                    # 無論原本是 success 還是 pending，成功後一律改為 completed
                     sb.table("mission_queue").update({"status": "completed", "scrape_status": "completed", "r2_url": file_name}).eq("id", task_id).execute()
                     print(f"✅ [成功] {file_name} 已入庫")
 
             except requests.exceptions.HTTPError as he:
                 if he.response.status_code == 403:
                     print(f"🚫 [ROE檢舉] 遭遇 403！標記 domain: {target_domain}")
-                    # 檢舉網域，讓 Vercel 鎖定 17 天
                     sb.table("pod_scra_rules").insert({"worker_id": "GITHUB_LOGISTICS", "domain": target_domain, "expired_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()}).execute()
-                    # 不用中斷整個 GITHUB 任務，但跳過當前網域
                 else: print(f"❌ HTTP錯誤: {he}")
             except Exception as e: print(f"❌ 任務潰敗: {e}")
             finally:
@@ -94,3 +98,8 @@ def run_logistics_mission():
                     if os.path.exists(p): os.remove(p)
                 
             if idx < len(download_list) - 1: time.sleep(random.randint(SLEEP_MIN, SLEEP_MAX))
+    else:
+        print("☕ [待命] 目前無 T2 支援任務或 T1 救援任務。")
+
+if __name__ == "__main__":
+    run_logistics_mission()
