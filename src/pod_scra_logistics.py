@@ -4,7 +4,15 @@
 # 任務：1. 雙軌下載：常規 T2 支援 + T1_RESCUE 403 破門救援
 #       2. 403 檢舉與規避 3. 擬人化偽裝
 # [v7.2 升級] 加入對 assigned_troop == 'T1_RESCUE' 的優先強制接管邏輯。
+#
+# [聯合作戰交接流程 (T1 & T2 雙軌分流)]
+# 1. T2 前鋒敗戰轉移：當 T2 (trans.py) 遭遇 403，會將 mission_queue 的 assigned_troop 改為 'T1_RESCUE'。
+# 2. 7 天黃金救援期：T2 將 troop2_start_at 推遲 7 天，並把 scrape_status 降回 'pending'，使 T2 雷達強制盲化。
+# 3. T1 破門接管 (軌道 A)：本程式優先監聽 'T1_RESCUE'，無視時間限制，啟動數位人格強勢接管 403 任務。
+# 4. T1 常規支援 (軌道 B)：本程式亦會撿拾 assigned_troop == 'T2' 且時間已達標的遺漏任務，作為安全網。
+# 5. 全域網域避戰：雙方遇 403 皆會寫入 pod_scra_rules (設定過期日)，防止同節點對該 domain 重複送死。
 # ---------------------------------------------------------
+
 import os, time, random, requests, boto3, subprocess, json
 from datetime import datetime, timezone, timedelta
 from supabase import create_client

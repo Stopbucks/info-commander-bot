@@ -64,43 +64,66 @@ class Troop1DBLinker:
         except Exception as e:
             print(f"⚠️ [T1 報到異常]: {e}")
             return False
-
-    def fetch_t1_mission(self, worker_id: str, mode: str = "combat"):
+def fetch_t1_mission(self, worker_id: str, mode: str = "combat"):
         """
-        🎯 [任務分發] 根據模式 (實戰或溫養) 獲取 assigned_troop = 'T1' 的目標
-        並在 mission_queue 留下明確的狀態標記供指揮官查閱
+        🎯 [任務分發 (雙軌升級版)] 
+        實戰模式：軌道 A 優先接管 T1_RESCUE 救援任務；軌道 B 處理時間已達標的常規 T1 任務。
+        溫養模式：僅處理 3 天後才開火的 T1 遠期目標。
+        並在 mission_queue 留下明確的狀態標記供指揮官查閱。
         """
         if not self.supabase: return None
-        now_utc = datetime.now(timezone.utc)
+        now_iso = datetime.now(timezone.utc).isoformat()
         
         # 💡 [戰略參數]：距離交接給 T2 的時間底線。大於此線的才值得溫養。
-        warmup_threshold = (now_utc + timedelta(days=3)).isoformat() 
+        warmup_threshold = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat() 
 
         try:
-            # 建立基礎查詢：限定 T1 且狀態為 pending
-            query = self.supabase.table("mission_queue").select("*") \
-                        .eq("scrape_status", "pending") \
-                        .eq("assigned_troop", "T1")
-
             if mode == "warmup":
                 # 💤 溫養模式：挑選還有 3 天以上才輪到 T2 的遠期目標
-                query = query.gte("troop2_start_at", warmup_threshold).order("troop2_start_at", desc=False)
+                res = self.supabase.table("mission_queue").select("*") \
+                        .eq("scrape_status", "pending") \
+                        .eq("assigned_troop", "T1") \
+                        .gte("troop2_start_at", warmup_threshold) \
+                        .order("troop2_start_at", desc=False).limit(1).execute()
+                
+                if not res.data: return None
+                mission = res.data[0]
+                
                 persona_mark = f"[{worker_id}] 溫養偵察中"
                 status_mark = "pending" # 保持 pending，因為今天只看不抓
                 log_msg = "鎖定長線目標進行溫養"
+
             else:
-                # ⚔️ 實戰模式：優先挑選時間最近、即將逾期的 T1 任務
-                query = query.order("troop2_start_at", desc=True)
+                # ⚔️ 實戰模式 (雙軌接管)
+                mission = None
+                
+                # 軌道 A：優先搜索 T1_RESCUE 救援任務 (無視時間，強制破門)
+                rescue_res = self.supabase.table("mission_queue").select("*") \
+                            .eq("scrape_status", "pending") \
+                            .eq("assigned_troop", "T1_RESCUE") \
+                            .order("created_at", desc=False).limit(1).execute()
+                
+                if rescue_res.data:
+                    mission = rescue_res.data[0]
+                    log_msg = "🚨 發起 T1_RESCUE 403 破門救援"
+                
+                # 軌道 B：若無救援，則搜索常規 T1 任務 (必須時間已達標)
+                if not mission:
+                    reg_res = self.supabase.table("mission_queue").select("*") \
+                            .eq("scrape_status", "pending") \
+                            .eq("assigned_troop", "T1") \
+                            .lte("troop2_start_at", now_iso) \
+                            .order("created_at", desc=False).limit(1).execute()
+                    
+                    if reg_res.data:
+                        mission = reg_res.data[0]
+                        log_msg = "發起常規 T1 實戰突擊"
+
+                if not mission: return None
+                
                 persona_mark = f"[{worker_id}] 實戰突擊中"
                 status_mark = "processing" # 鎖定為處理中，防止重複抓取
-                log_msg = "發起實戰下載突擊"
 
-            res = query.limit(1).execute()
-            if not res.data:
-                return None
-            
-            mission = res.data[0]
-            
             # 🚀 在 Supabase 留下明確的「準備動作」標記
             self.supabase.table("mission_queue").update({
                 "scrape_status": status_mark,
