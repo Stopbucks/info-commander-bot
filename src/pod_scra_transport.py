@@ -118,9 +118,9 @@ def run_transport_and_report():
                     "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                     "total_score": metrics["score"],
                     "evidence_count": metrics["evidence"],
-                    "stated_value": metrics["stated"],
-                    "inferred_trust": metrics["inferred"],
-                    "subjective_value": metrics["subjective"]
+                    "stated_score": metrics["stated"],       # 🚀 修正：對齊資料庫的 stated_score
+                    "inferred_score": metrics["inferred"],   # 🚀 修正：解決 PGRST204 崩潰
+                    "subjective_score": metrics["subjective"]# 🚀 修正：對齊資料庫的 subjective_score
                 }).execute()
 
                 # 📡 [報戰發布]
