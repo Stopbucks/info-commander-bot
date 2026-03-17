@@ -1,0 +1,237 @@
+# ---------------------------------------------------------
+# 本程式碼：src/pod_scra_scout.py v1.0  (隱蔽斥候特遣隊)
+# 任務：1. 智慧 RSS 巡邏 2. 深度 HTML 攻堅 3. 輕量探針 (HEAD) 4. DB 寫入避震
+# [v1.0 誕生] 1. 職責分離：承接原 Officer 的核心解析能力，專精於對外索敵、爬蟲解析與情報建檔。
+# [隱蔽戰術] 智慧排班過濾：update_frequency_days 檢查，未更新節目不處理，# 減少 70% 無效偵察。
+# [防爆戰術] 資料庫避震器：Supabase Insert/Update ，加入 隨機 db_jitter (0.2~0.8秒) ，防鎖死。
+# [降維打擊] 探針型別修復：自動 Content-Length 向下轉型為純整數，根除 22P02 資料庫型別衝突。
+# [戰鬥協議] 延續 RSS 絕對霸權與無效 Slug 攔截，遇 403 封鎖自動上報 ROE 檢舉 (pod_scra_rules)。
+# [偵查數量] 10新 +4舊
+# ---------------------------------------------------------
+
+import os, time, random, feedparser
+from urllib.parse import urlparse 
+from datetime import datetime, timezone, timedelta 
+from bs4 import BeautifulSoup
+from pod_scra_scanner import fetch_html
+
+def db_jitter():
+    """🛡️ [資料庫避震器] 寫入 Supabase 前隨機微延遲 (0.2~0.8秒)，防止高併發鎖死"""
+    time.sleep(random.uniform(0.2, 0.8))
+
+def log_recon_failure(sb, task_id, provider, program_name, error_msg):
+    """🚀 [黑盒子寫入] 紀錄失敗原因"""
+    try:
+        db_jitter()
+        res = sb.table("mission_queue").select("recon_failure_log").eq("id", task_id).single().execute()
+        current_log = res.data.get("recon_failure_log") if res.data else []
+        if not isinstance(current_log, list): current_log = []
+        
+        current_log.append({
+            "provider": provider,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "program": program_name,
+            "reason": str(error_msg)[:200] 
+        })
+        sb.table("mission_queue").update({"recon_failure_log": current_log}).eq("id", task_id).execute()
+    except Exception as e:
+        print(f"⚠️ [日誌紀錄失敗]: {e}")
+
+def probe_audio_metadata(url, session):
+    """🚀 [連線池探針] 獲取音檔規格，使用 Session 保持連線以提高隱蔽性與速度"""
+    meta = {"size_mb": None, "ext": None, "skip_reason": None}
+    try:
+        with session.head(url, allow_redirects=True, timeout=5) as r:
+            if r.status_code == 200:
+                cl = r.headers.get('Content-Length')
+                if cl and cl.isdigit():
+                    meta["size_mb"] = int(int(cl) / (1024 * 1024))
+
+                ct = r.headers.get('Content-Type', '').lower()
+                if 'mpeg' in ct: meta["ext"] = ".mp3"
+                elif 'm4a' in ct: meta["ext"] = ".m4a"
+                elif 'ogg' in ct: meta["ext"] = ".ogg"
+                elif 'opus' in ct: meta["ext"] = ".opus"
+        
+        if not meta["ext"]:
+            meta["ext"] = os.path.splitext(urlparse(url).path)[1].lower() or ".mp3"
+
+        s, e = meta["size_mb"], meta["ext"]
+        if s is not None:
+            if s > 25: meta["skip_reason"] = f"Oversize: {s}MB (Limit 25MB)"
+            elif e in [".ogg", ".opus"] and s > 12: meta["skip_reason"] = f"Oversize: {s}MB {e} (Limit 12MB)"
+            
+    except Exception as e:
+        print(f"📡 [探針失效] 無法預測物資規格: {e}")
+    return meta
+
+def execute_rss_recon(sb, current_time, session, alarm_callback):
+    """📡 [任務一] 全量 RSS 偵察與智慧排班"""
+    current_iso = current_time.isoformat()
+    sources = sb.table("mission_program_master").select("*").eq("is_active", True).execute().data
+    
+    for s in sources:
+        if not s.get("rss_feed_url"): continue
+
+        # 🛡️ [智慧排班] 檢查是否達到更新頻率，減少無謂連線
+        freq_days = s.get("update_frequency_days") or 1
+        last_check = s.get("last_checked_at")
+        if last_check:
+            last_check_dt = datetime.fromisoformat(last_check.replace("Z", "+00:00"))
+            if (current_time - last_check_dt).days < freq_days:
+                continue # 時間未到，保持靜默
+
+        try:
+            feed = feedparser.parse(s["rss_feed_url"])
+            if feed.entries:
+                entry = feed.entries[0]
+                audio_url = next((e.href for e in entry.enclosures if e.type.startswith("audio")), None)
+                
+                if audio_url:
+                    exists = sb.table("mission_queue").select("id").eq("audio_url", audio_url).execute()
+                    
+                    if not exists.data:
+                        print(f"🔎 發現新物資: {s['program_name']}，執行海關核驗...")
+                        meta = probe_audio_metadata(audio_url, session)
+                        
+                        wait_days = s.get("wait_days") or 0
+                        t2_start = (current_time + timedelta(days=wait_days)).isoformat()
+                        assigned = "T1" if wait_days > 0 else "T2"
+
+                        payload = {
+                            "source_name": s["program_name"], "audio_url": audio_url,
+                            "episode_title": entry.title[:100], "podbay_slug": s.get("podbay_slug"), 
+                            "scrape_status": "success", "used_provider": "RSS_STRIKE",
+                            "assigned_troop": assigned, "troop2_start_at": t2_start, 
+                            "audio_size_mb": meta["size_mb"], "audio_ext": meta["ext"], "skip_reason": meta["skip_reason"] 
+                        }
+                        
+                        db_jitter()
+                        sb.table("mission_queue").insert(payload).execute()
+                        status_msg = f"✅ 已發送物流" if not meta["skip_reason"] else f"🛑 海關攔截 ({meta['skip_reason']})"
+                        print(f"{status_msg}: {s['program_name']}")
+
+            db_jitter()
+            sb.table("mission_program_master").update({"last_checked_at": current_iso}).eq("podbay_slug", s["podbay_slug"]).execute()
+            
+            # 🛡️ RSS 隱蔽性間隔
+            time.sleep(random.uniform(0.5, 1.5))
+            
+        except Exception as e:
+            err_str = str(e)
+            print(f"⚠️ 偵察 {s['program_name']} 時遇到干擾: {err_str}")
+            if "invalid input syntax" in err_str or "quota" in err_str.lower():
+                alarm_callback(err_str)
+
+def execute_html_recon(sb, current_time, session, provider, persona_label, api_key, alarm_callback):
+    """🔦 [任務二] 補漏偵察 (HTML 攻堅)"""
+    current_iso = current_time.isoformat()
+    
+    db_jitter()
+    new_m = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "pending").lte("troop2_start_at", current_iso)\
+            .order("created_at", desc=True).limit(10).execute()
+    db_jitter()
+    old_m = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "pending").lte("troop2_start_at", current_iso)\
+            .order("created_at", desc=False).limit(4).execute()
+    
+    all_missions = (new_m.data or []) + (old_m.data or [])
+
+    for m in all_missions:
+        task_id, slug = m['id'], str(m.get('podbay_slug') or "").strip()
+        title, source_name = m.get('episode_title', ""), m.get('source_name', "Unknown")
+        master = m.get('mission_program_master')
+        history = str(m.get('recon_persona') or "")
+        
+        if persona_label in history: continue 
+
+        has_rss = bool(master and master.get('rss_feed_url'))
+        
+        # --- 🛡️ 絕對防線：RSS 優先協議 ---
+        if has_rss:
+            try:
+                feed = feedparser.parse(master['rss_feed_url'])
+                target = next((e for e in feed.entries if e.title == title), None)
+                if target:
+                    f_audio = next((enc.href for enc in target.enclosures if enc.type.startswith("audio")), None)
+                    if f_audio:
+                        db_jitter()
+                        sb.table("mission_queue").update({"audio_url": f_audio, "scrape_status": "success", "used_provider": "RSS_STRIKE"}).eq("id", task_id).execute()
+                        print(f"✅ [秒殺] RSS 協議捕獲成功！")
+                        continue
+                
+                log_recon_failure(sb, task_id, "RSS_STRIKE", source_name, "RSS_ENTRY_NOT_FOUND")
+            except Exception as e:
+                log_recon_failure(sb, task_id, "RSS_STRIKE", source_name, "RSS_PARSE_ERROR")
+            
+            db_jitter()
+            upd = {"recon_persona": history + (" | " if history else "") + "RSS_ONLY", "last_scraped_at": current_iso}
+            sb.table("mission_queue").update(upd).eq("id", task_id).execute()
+            continue
+
+        # --- 🚧 攔截無效 Slug ---
+        is_valid_slug = bool(slug and slug.lower() != "null" and not slug.isdigit())
+        if not is_valid_slug:
+            log_recon_failure(sb, task_id, provider, source_name, f"INVALID_OR_EMPTY_SLUG: '{slug}'")
+            db_jitter()
+            upd = {"recon_persona": history + (" | " if history else "") + "INVALID_SLUG", "last_scraped_at": current_iso}
+            sb.table("mission_queue").update(upd).eq("id", task_id).execute()
+            continue
+
+        # --- ⚔️ HTML 深度攻堅 ---
+        try:
+            resp = fetch_html(provider, f"https://podbay.fm/p/{slug}", {provider: api_key})
+            
+            if resp and resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, 'html.parser')
+                f_audio, f_rss = None, None
+                
+                for a in soup.find_all('a', href=True):
+                    hrf, txt = a['href'].lower(), a.get_text().upper()
+                    if not f_audio and ('DOWNLOAD' in txt or 'MP3' in txt) and \
+                        any(k in hrf for k in ['podtrac', 'megaphone', 'pdst', 'pscrb']):
+                        f_audio = a['href']
+                    if any(key in txt for key in ['RSS', 'FEED']) and 'podbay.fm' not in hrf:
+                        f_rss = a['href']
+                
+                if f_rss and (not master or not master.get('rss_feed_url')):
+                    db_jitter()
+                    sb.table("mission_program_master").update({"rss_feed_url": f_rss}).eq("podbay_slug", slug).execute()
+
+                upd = {"recon_persona": history + (" | " if history else "") + persona_label, "last_scraped_at": current_iso}
+
+                if f_audio:
+                    meta = probe_audio_metadata(f_audio, session) 
+                    wait_days = master.get("wait_days") if master else 0
+                    t2_start = (current_time + timedelta(days=wait_days)).isoformat()
+                    assigned = "T1" if wait_days > 0 else "T2"
+
+                    upd.update({
+                        "audio_url": f_audio, "scrape_status": "success", "used_provider": f"{provider}_FISHER",
+                        "assigned_troop": assigned, "troop2_start_at": t2_start, 
+                        "audio_size_mb": meta["size_mb"], "audio_ext": meta["ext"], "skip_reason": meta["skip_reason"] 
+                    })
+                    db_jitter()
+                    sb.table("mission_queue").update(upd).eq("id", task_id).execute()
+                    print(f"✅ [結案] HTML 偵察完畢。指派: {assigned} | 規格: {meta['size_mb']}MB")
+                else:
+                    log_recon_failure(sb, task_id, provider, source_name, "AUDIO_NOT_FOUND_ON_PAGE")
+                    db_jitter()
+                    sb.table("mission_queue").update(upd).eq("id", task_id).execute()
+
+            elif resp and resp.status_code == 403: 
+                target_domain = urlparse(f"https://podbay.fm/p/{slug}").netloc
+                db_jitter()
+                sb.table("pod_scra_rules").insert({
+                    "worker_id": "GITHUB_OFFICER", "domain": target_domain,
+                    "expired_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+                }).execute()
+                log_recon_failure(sb, task_id, provider, source_name, "HTTP_403_FORBIDDEN")
+            else:
+                reason = f"HTTP_{resp.status_code}" if resp else "NO_RESPONSE"
+                log_recon_failure(sb, task_id, provider, source_name, reason)
+
+        except Exception as e:
+            err_str = str(e)
+            log_recon_failure(sb, task_id, provider, source_name, err_str)
+            if any(k in err_str.lower() for k in ["quota", "unauthorized", "429", "invalid input syntax"]):
+                alarm_callback(err_str)
