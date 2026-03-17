@@ -129,10 +129,10 @@ def execute_html_recon(sb, current_time, session, provider, persona_label, api_k
     
     db_jitter()
     new_m = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "pending").lte("troop2_start_at", current_iso)\
-            .order("created_at", desc=True).limit(10).execute()
+            .order("created_at", desc=True).limit(4).execute()
     db_jitter()
     old_m = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "pending").lte("troop2_start_at", current_iso)\
-            .order("created_at", desc=False).limit(4).execute()
+            .order("created_at", desc=False).limit(1).execute()
     
     all_missions = (new_m.data or []) + (old_m.data or [])
 
