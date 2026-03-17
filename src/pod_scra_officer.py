@@ -23,7 +23,7 @@ from pod_scra_scanner import fetch_html
 # 4. HASDATA     : [特種部隊] 最強住宅代理，專攻 Cloudflare 高防禦目標。
 # 5. SCRAPINGANT : [通用步兵] 穩定渲染，常規備用軍力，中規中矩。
 # =========================================================
-ACTIVE_STRATEGY = 2 
+ACTIVE_STRATEGY = 3 
 STRATEGY_MAP = {
     1: {"provider": "SCRAPERAPI", "label": "Win11_Chrome_Premium", "key_name": "SCRAP_API_KEY_V2"},
     2: {"provider": "WEBSCRAPING", "label": "Win11_Chrome_WebScraping", "key_name": "WEBSCRAPING_API_KEY"},
