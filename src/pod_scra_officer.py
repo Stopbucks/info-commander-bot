@@ -23,7 +23,7 @@ from pod_scra_scanner import fetch_html
 # 4. HASDATA     : [特種部隊] 最強住宅代理，專攻 Cloudflare 高防禦目標。
 # 5. SCRAPINGANT : [通用步兵] 穩定渲染，常規備用軍力，中規中矩。
 # =========================================================
-ACTIVE_STRATEGY = 3 
+ACTIVE_STRATEGY = 2 
 STRATEGY_MAP = {
     1: {"provider": "SCRAPERAPI", "label": "Win11_Chrome_Premium", "key_name": "SCRAP_API_KEY_V2"},
     2: {"provider": "WEBSCRAPING", "label": "Win11_Chrome_WebScraping", "key_name": "WEBSCRAPING_API_KEY"},
@@ -39,6 +39,16 @@ def get_secret(key, default=None):
             v = json.load(f)
             return v.get("active_credentials", {}).get(key, default)
     return os.environ.get(key, default)
+
+def trigger_global_alarm(sb, error_msg):
+    """🚨 [T1 專屬警報] 發生異常時，將情報寫入 T1 專屬錯誤欄位，避免干擾 T2 主將"""
+    try:
+        sb.table("pod_scra_tactics").update({
+            "last_error_type_troop1": f"[Officer 異常] {str(error_msg)[:200]}"
+        }).eq("id", 1).execute()
+        print(f"🚨 [戰情通報] 已向中央面板 (T1 區塊) 發送異常警報！")
+    except Exception as e:
+        print(f"⚠️ [警報發送失敗]: {e}")
 
 def log_recon_failure(sb, task_id, provider, program_name, error_msg):
     """🚀 [黑盒子寫入] 將失敗細節填入 JSONB 欄位"""
@@ -66,8 +76,9 @@ def probe_audio_metadata(url):
             if r.status_code == 200:
                 cl = r.headers.get('Content-Length')
                 if cl and cl.isdigit():
-                    meta["size_mb"] = round(int(cl) / (1024 * 1024), 2)
-                
+                    # 🚀 [修正] 將 Float 強制轉為 Integer，迎合 Supabase 欄位格式
+                    meta["size_mb"] = int(int(cl) / (1024 * 1024))
+
                 ct = r.headers.get('Content-Type', '').lower()
                 if 'mpeg' in ct: meta["ext"] = ".mp3"
                 elif 'm4a' in ct: meta["ext"] = ".m4a"
@@ -79,7 +90,7 @@ def probe_audio_metadata(url):
             meta["ext"] = os.path.splitext(path)[1].lower() or ".mp3"
 
         s, e = meta["size_mb"], meta["ext"]
-        if s:
+        if s is not None:
             if s > 25:
                 meta["skip_reason"] = f"Oversize: {s}MB (Limit 25MB)"
             elif e in [".ogg", ".opus"] and s > 12:
@@ -150,7 +161,11 @@ def run_scra_officer():
             sb.table("mission_program_master").update({"last_checked_at": now_iso}).eq("podbay_slug", s["podbay_slug"]).execute()
             
         except Exception as e:
-            print(f"⚠️ 偵察 {s['program_name']} 時遇到干擾: {e}")
+            err_str = str(e)
+            print(f"⚠️ 偵察 {s['program_name']} 時遇到干擾: {err_str}")
+            # 🚨 啟動警報：如果是資料庫寫入型別錯誤，立即上報 (T1 專屬區塊)
+            if "invalid input syntax" in err_str or "quota" in err_str.lower():
+                trigger_global_alarm(sb, err_str)
 
 
     # === ⚡ 任務二：補漏偵察 (HTML 攻堅並紀錄失敗) ===
@@ -267,8 +282,12 @@ def run_scra_officer():
                 print(f"❌ [攻堅受阻] {source_name}: {reason}")
 
         except Exception as e:
-            log_recon_failure(sb, task_id, provider, source_name, str(e))
-            print(f"💥 HTML 攻堅異常: {e}")
+            err_str = str(e)
+            log_recon_failure(sb, task_id, provider, source_name, err_str)
+            print(f"💥 HTML 攻堅異常: {err_str}")
+            # 🚨 啟動警報：攔截 API 點數耗盡 (401/429/Quota) 或其他致命錯誤 (T1 專屬區塊)
+            if any(k in err_str.lower() for k in ["quota", "unauthorized", "429", "invalid input syntax"]):
+                trigger_global_alarm(sb, err_str)
 
     # =========================================================
     # ⚡ 任務五：Supabase 資料庫垃圾清運 (17 天舊物資紀錄)
