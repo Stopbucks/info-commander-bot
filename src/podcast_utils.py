@@ -72,7 +72,7 @@ PERSONA_WAREHOUSE = {
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
         }
     },
-    "FLY_LA_LEGACY": {
+    "GCP_IPHONE_LEGACY": {
         "impersonate": "chrome124",
         "headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -80,13 +80,13 @@ PERSONA_WAREHOUSE = {
             "Sec-Ch-Ua-Platform": '"Windows"'
         }
     },
-    "GCP_IPHONE_LEGACY": {
-        "impersonate": "safari15_5",
-        "headers": {
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-    },
+#    "GCP_IPHONE_LEGACY": {
+#        "impersonate": "safari15_5",
+#        "headers": {
+#            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+#            "Accept-Language": "en-US,en;q=0.9"
+#        }
+#    },
     "ULTIMATE_FALLBACK": {
         "impersonate": "chrome110",
         "headers": {
