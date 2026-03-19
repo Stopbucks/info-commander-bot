@@ -1,8 +1,10 @@
 # ---------------------------------------------------------
 # app.py (V5.5 主力極簡淨化與非同步防禦版)
 # 適用：RENDER, KOYEB, ZEABUR, FLY, HF, DBOS | 規格：全軍通用
+# [工作流程] 每 2 小時執行一次任務，透過「初始隨機延遲 + 排程器 Jitter」錯開起跑線，避免羊群效應。
+# [工作流程] 本程式負責排程喚醒與連線保活，其他交由src/pod_scra_intel_trans.py  與 control.py 面板動態統御。
 # [修正] 1. 徹底拔除轉譯白名單與冗餘參數，對接 V5.5 狀態機。
-# [修正] 2. 拔除寫死的 MEMORY_TIER，全面交由 control.py 統御。
+# [新增] 2. 植入 db_jitter 微延遲避震器，並套用至日誌與錯誤回報，避免併發競合寫入 (Race Condition)。
 # ---------------------------------------------------------
 import os, time, gc, random, threading, traceback
 from datetime import datetime, timezone, timedelta
@@ -27,10 +29,15 @@ WATCHDOG_TIMEOUT = 3600
 def get_sb(): 
     return create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
 
+def db_jitter():
+    """🛡️ 隨機微延遲避震：防止多台機甲同時寫入造成資料庫 Lock 或競合"""
+    time.sleep(random.uniform(0.2, 1.0))
+
 def s_log(sb, task_type, status, message, err_stack=None):
     try:
         print(f"[{task_type}][{status}] {message}", flush=True)
         if status in ["SUCCESS", "ERROR"] or "啟動" in message or "V5.5" in message:
+            db_jitter()  # 👈 寫入前閃避
             sb.table("mission_logs").insert({
                 "worker_id": CONFIG["WORKER_ID"], "task_type": task_type,
                 "status": status, "message": message, "traceback": err_stack
@@ -39,9 +46,12 @@ def s_log(sb, task_type, status, message, err_stack=None):
 
 def report_soft_failure(sb, worker_id, error_msg):
     try:
+        db_jitter()  # 👈 讀取前閃避
         res = sb.table("pod_scra_tactics").select("active_worker, consecutive_soft_failures, worker_status").eq("id", 1).single().execute()
         if not res.data: return
         tactic = res.data
+        
+        db_jitter()  # 👈 寫入前閃避
         if worker_id == tactic.get("active_worker"):
             sb.table("pod_scra_tactics").update({
                 "consecutive_soft_failures": tactic.get("consecutive_soft_failures", 0) + 1,
@@ -103,8 +113,18 @@ def trigger():
     return "Mission Triggered (Async)", 202
 
 scheduler = BackgroundScheduler()
-run_next = datetime.now() + timedelta(minutes=5)
-scheduler.add_job(func=run_integrated_mission, trigger="interval", hours=CONFIG["INTERVAL_HOURS"], next_run_time=run_next)
+# 🚀 【起跑線錯開】：每次重開機隨機等待 2 到 15 分鐘後才執行第一輪
+startup_delay = random.randint(2, 15)
+run_next = datetime.now() + timedelta(minutes=startup_delay)
+
+# 🚀 【週期性防踩踏】：每次 2 小時排程觸發時，隨機提早或延遲 0~15 分鐘 (900秒)
+scheduler.add_job(
+    func=run_integrated_mission, 
+    trigger="interval", 
+    hours=CONFIG["INTERVAL_HOURS"], 
+    jitter=900, 
+    next_run_time=run_next
+)
 scheduler.start()
 
 if __name__ == "__main__":

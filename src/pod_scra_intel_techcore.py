@@ -1,9 +1,10 @@
 # ---------------------------------------------------------
-# 程式碼：src/pod_scra_intel_techcore.py (V5.5 雷達與兵器庫版)
+# 程式碼：src/pod_scra_intel_techcore.py (V5.6 雷達與兵器庫 終極防彈版)
 # 職責：1. [雷達] fetch_stt_tasks：依據 mem_tier 與 worker_id 進行動態三級分流。
 #       2. [容錯] increment_soft_failure：處理失敗不墜機，打上標記交接重裝。
 #       3. [火力] 封裝 Supabase 讀寫、AI (Gemini/Groq) 呼叫與 Telegram 戰報。
-# 特色：無狀態、用完即丟！將記憶體消耗限制在函式內部，確保機甲穩定。
+# 修正：完美適配 Supabase 最新版 SDK，導入 gte 與 nullsfirst 防彈語法！
+# 適用：全軍通用 (FLY, RENDER, KOYEB, ZEABUR, DBOS, HF)
 # ---------------------------------------------------------
 import requests, base64, re, gc
 from datetime import datetime
@@ -20,22 +21,19 @@ def fetch_stt_tasks(sb, mem_tier, worker_id="UNKNOWN", fetch_limit=50):
 
     if mem_tier < 512:
         # 🏹 輕裝游擊隊 (FLY): 安全第一
-        # 條件：無軟失敗(0/null) + 已經壓縮(opt_) + 小於 15MB
-        # 排序：檔案由小至大 (升冪 desc=False)
+        # 🚀 終極防彈寫法：用 gte("audio_size_mb", 0) 取代容易崩潰的 is not null
         query = query.or_("soft_failure_count.eq.0,soft_failure_count.is.null") \
-                     .not_("audio_size_mb", "is", "null").ilike("r2_url", "opt_%").lt("audio_size_mb", 15) \
+                     .gte("audio_size_mb", 0).ilike("r2_url", "opt_%").lt("audio_size_mb", 15) \
                      .order("audio_size_mb", desc=False)
                      
     elif worker_id in ["DBOS", "HUGGINGFACE"]:
         # 🚜 重裝巨獸 (HF / DBOS)：無差別碾壓
-        # 條件：完全無視軟失敗次數 (受天花板保護即可)
-        # 排序：檔案由大至小 (降冪 desc=True)，優先處理 null (剛載好還沒測大小的原始檔)
+        # 🚀 語法修正：nullsfirst=True (新版 SDK 無底線)
         query = query.order("audio_size_mb", desc=True, nullsfirst=True)
                      
     else:
         # 🛡️ 中型部隊 (RENDER / KOYEB / ZEABUR)：穩健推進
-        # 排序一：軟失敗次數由少至多 (升冪 desc=False)，優先處理健康的 (null/0 -> 1 -> 2)
-        # 排序二：同次數下，檔案由大至小 (降冪 desc=True)
+        # 🚀 語法修正：nullsfirst=True (新版 SDK 無底線)
         query = query.order("soft_failure_count", desc=False, nullsfirst=True) \
                      .order("audio_size_mb", desc=True, nullsfirst=True)
         
