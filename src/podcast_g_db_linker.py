@@ -24,7 +24,6 @@ class Troop1DBLinker:
     def s_log(self, worker_id: str, task_type: str, status: str, message: str, traceback: str = None):
         """
         📝 [戰情寫入] 將行動日誌打入全軍共用的 mission_logs 表格
-        讓指揮官在 Supabase 就能看到 G-Squad 的每日成敗！
         """
         if not self.supabase: return
         try:
@@ -64,7 +63,9 @@ class Troop1DBLinker:
         except Exception as e:
             print(f"⚠️ [T1 報到異常]: {e}")
             return False
-def fetch_t1_mission(self, worker_id: str, mode: str = "combat"):
+
+    # 🚀 修正：正確縮排 4 格，讓它歸屬於 Troop1DBLinker 類別
+    def fetch_t1_mission(self, worker_id: str, mode: str = "combat"):
         """
         🎯 [任務分發 (雙軌升級版)] 
         實戰模式：軌道 A 優先接管 T1_RESCUE 救援任務；軌道 B 處理時間已達標的常規 T1 任務。
