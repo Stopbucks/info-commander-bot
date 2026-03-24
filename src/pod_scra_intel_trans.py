@@ -8,13 +8,14 @@
 # [主將範例] RENDER 為主將 (MAX=6)：同樣在「第 1 拍」抓音檔，第 2~6 拍做摘要與轉譯 (高頻進貨)。
 # [後勤範例] 若身分為「後勤兵」：完全不管 MAX 是多少，【永遠不出門抓檔】，只專心交替做轉譯與摘要。
 # [節拍總結] MAX_TICKS 的大小，實質上決定了「主將多久出門進貨一次」的冷卻週期。
-# [防禦] 穩健進貨：放寬至 limit(2)，並配備雙重 Jitter 擬人化延遲。
+# [防禦] 穩健進貨：放寬至 limit(2)，並配備雙重 Jitter 擬人化延遲。 搭配修正5.
 # [隱蔽] 導入 camouflage 千面人模組，透過機甲基因種子達成每日一致性偽裝。
 
 # 修正：1. 徹底拔除 audio_officers 與冗餘的傳入參數，避免呼叫崩潰。
 # 2. 將 max_ticks 交由 src.pod_scra_intel_control 面板動態管理，落實低耦合。
 # 3. [T2 敗戰轉移] 遭遇 403/401 封鎖時，自動將任務降級為 pending (冰封10天)並標記 T1_RESCUE。
 # 4. [黃金救援期] 推遲 troop2_start_at 7 天，完美錯開 T2 雷達，精準移交 T1 數位人格處理。
+# 5. 一次拿10個下載名單，抓取2個不同網域伺服器各1個，如果是相同，只抓一個檔案下載。
 # ---------------------------------------------------------
 
 import os, requests, time, random, gc, json
@@ -70,11 +71,10 @@ def execute_fortress_stages(sb, config, s_log_func):
     health[worker_id] = now_iso
     sb.table("pod_scra_tactics").update({"last_heartbeat_at": now_iso, "workers_health": health, "worker_status": w_status}).eq("id", 1).execute()
 
-
 def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
-    # 🛡️ 檔案下載數量限制放寬至 2
+    # 🛡️ 戰略升級：為了尋找「不同網域」的目標，我們先拿多一點候選清單 (limit 10)
     query = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "success").is_("r2_url", "null").lte("troop2_start_at", now_iso).order("created_at", desc=True)\
-        .limit(2)  
+        .limit(10)  
     tasks = query.execute().data or []
     if not tasks: return
     
@@ -84,14 +84,27 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
     
     time.sleep(random.uniform(2.0, 5.0))
     
-    for idx, m in enumerate(tasks):
-        if idx > 0:
-            time.sleep(random.uniform(5.0, 12.0))
-
+    visited_domains = set() # 🚀 新增：已造訪網域紀錄簿，確保「打完就跑」不重複
+    downloaded_count = 0    # 🚀 新增：實際下載計數器
+    
+    for m in tasks:
+        # 🛡️ 控制單次最高產能：最多抓 2 個就收隊
+        if downloaded_count >= 2:
+            break
+            
         f_url = m.get('audio_url')
         if not f_url: continue
         target_domain = urlparse(f_url).netloc
+        
         if any(b in target_domain for b in my_blacklist): continue
+        
+        # 🚀 核心低調邏輯：如果這個網域剛剛才抓過，直接跳過，留給下個梯次的機甲
+        if target_domain in visited_domains:
+            s_log_func(sb, "DOWNLOAD", "INFO", f"🕵️ [低調迴避] 剛才已打擊過 {target_domain}，分散火力，跳過此筆。")
+            continue
+
+        if downloaded_count > 0:
+            time.sleep(random.uniform(5.0, 12.0))
 
         ext = os.path.splitext(urlparse(f_url).path)[1] or ".mp3"
         tmp_path = f"/tmp/dl_{m['id'][:8]}{ext}"
@@ -108,6 +121,9 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
             s3.upload_file(tmp_path, bucket, os.path.basename(tmp_path))
             sb.table("mission_queue").update({"scrape_status": "completed", "r2_url": os.path.basename(tmp_path)}).eq("id", m['id']).execute()
             s_log_func(sb, "DOWNLOAD", "SUCCESS", f"✅ 物資入庫: {m['id'][:8]}")
+            
+            visited_domains.add(target_domain) # 🚀 下載成功後，將此網域加入「已造訪」名單
+            downloaded_count += 1              # 🚀 計數器 +1
             
         except requests.exceptions.HTTPError as he:
             status_code = he.response.status_code
