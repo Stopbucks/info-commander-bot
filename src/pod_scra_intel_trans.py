@@ -1,8 +1,9 @@
 # ---------------------------------------------------------
-# 程式碼：src/pod_scra_intel_trans.py  (V5.6 面板統御防崩潰版)
+# 程式碼：src/pod_scra_intel_trans.py  (V5.7 變速箱_面板統御防崩潰版)
 # [節拍] 狀態機邏輯：透過 MAX_TICKS 控制循環。若主將設為 3 拍，則依序執行 [1:下載, 2:摘要, 3:轉譯]。
 # [節拍] 判斷公式：利用除以 2 的餘數 (current_tick % 2 != 0) 來動態交替分配任務型態。
 # [節拍] 任務分配：單數拍 (1, 3, 5...) 執行轉譯 (STT)；雙數拍 (2, 4, 6...) 執行摘要 (Summary)。
+# [變速箱] IDLE_GEARBOX: 隱蔽變速箱。控制非值勤機甲的降速齒輪比。預設 3.0 代表巡邏週期拉長 3 倍 
 
 # [主將範例] FLY 為主將 (MAX=12)：僅在「第 1 拍」出門抓音檔，第 2~12 拍交替做摘要與轉譯 (低頻進貨)。
 # [主將範例] RENDER 為主將 (MAX=6)：同樣在「第 1 拍」抓音檔，第 2~6 拍做摘要與轉譯 (高頻進貨)。
@@ -29,7 +30,7 @@ def execute_fortress_stages(sb, config, s_log_func):
     now_iso = datetime.now(timezone.utc).isoformat()
     worker_id = config.get("WORKER_ID", "UNKNOWN_NODE")
     
-    # 向控制面板請求專屬裝備 (包含 MAX_TICKS)
+    # 🚀 取得面板裝備 (包含 MAX_TICKS 與 IDLE_GEARBOX)
     panel = get_tactical_panel(worker_id)
     
     time.sleep(random.uniform(3.0, 8.0))
@@ -42,8 +43,12 @@ def execute_fortress_stages(sb, config, s_log_func):
     tick_key = f"{worker_id}_tick"
     current_tick = w_status.get(tick_key, 0) + 1
     
-    # 🚀 由面板決定這台機甲的循環長度
+    # ⚙️ 啟動變速箱邏輯：非值勤兵套用怠速齒輪比
     max_ticks = panel.get("MAX_TICKS", 2) 
+    if not is_duty_officer:
+        gear_ratio = panel.get("IDLE_GEARBOX", 4.0) # 預設容錯 4.0
+        max_ticks = int(max_ticks * gear_ratio)  # 確保計算結果為完美的整數節拍
+        
     if current_tick > max_ticks: current_tick = 1
         
     role_name = "👑 值勤官" if is_duty_officer else "🛠️ 後勤兵"
@@ -51,15 +56,18 @@ def execute_fortress_stages(sb, config, s_log_func):
 
     from src.pod_scra_intel_core import run_audio_to_stt_mission, run_stt_to_summary_mission
 
-    # 🛡️ 遵循指揮官戰略：只有值勤官，且只有在「第 1 拍」時，才允許去外面下載資料！
-    if is_duty_officer and current_tick == 1:
-        s_log_func(sb, "STATE_M", "INFO", f"{role_name} 執行階段 1/{max_ticks}: 外部走私下載")
+    # 🛡️ 只要是「第 1 拍」，全軍皆可出門！但依據身分給予不同載重量。
+    if current_tick == 1:
+        dl_limit = 2 if is_duty_officer else 1  # 👈 主將拿 2 個，後勤兵低調只拿 1 個
+        s_log_func(sb, "STATE_M", "INFO", f"{role_name} 執行階段 1/{max_ticks}: 外部走私下載 (上限 {dl_limit} 筆)")
+        
         rule_res = sb.table("pod_scra_rules").select("domain").in_("worker_id", [worker_id, "ALL"]).gte("expired_at", now_iso).execute()
         my_blacklist = [r['domain'] for r in rule_res.data] if rule_res.data else []
-        run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist)
+        # 將上限 dl_limit 傳入物流引擎
+        run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist, dl_limit) 
     
-    # 轉譯與摘要交替執行
-    elif current_tick % 2 != 0 or (not is_duty_officer and current_tick == 1):
+    # 轉譯與摘要交替執行 (單數拍 STT, 雙數拍 Summary)
+    elif current_tick % 2 != 0:
         s_log_func(sb, "STATE_M", "INFO", f"{role_name} 啟動轉譯產線 (由面板接管)")
         run_audio_to_stt_mission(sb) 
     else:
@@ -71,8 +79,8 @@ def execute_fortress_stages(sb, config, s_log_func):
     health[worker_id] = now_iso
     sb.table("pod_scra_tactics").update({"last_heartbeat_at": now_iso, "workers_health": health, "worker_status": w_status}).eq("id", 1).execute()
 
-def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
-    # 🛡️ 戰略升級：為了尋找「不同網域」的目標，我們先拿多一點候選清單 (limit 10)
+def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist, dl_limit=2):
+    # 🛡️ 為了尋找「不同網域」的目標，我們先拿多一點候選清單 (limit 10)
     query = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "success").is_("r2_url", "null").lte("troop2_start_at", now_iso).order("created_at", desc=True)\
         .limit(10)  
     tasks = query.execute().data or []
@@ -84,12 +92,12 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
     
     time.sleep(random.uniform(2.0, 5.0))
     
-    visited_domains = set() # 🚀 新增：已造訪網域紀錄簿，確保「打完就跑」不重複
-    downloaded_count = 0    # 🚀 新增：實際下載計數器
+    visited_domains = set() # 🚀 已造訪網域紀錄簿，確保「打完就跑」不重複
+    downloaded_count = 0    # 🚀 實際下載計數器
     
     for m in tasks:
-        # 🛡️ 控制單次最高產能：最多抓 2 個就收隊
-        if downloaded_count >= 2:
+        # 🛡️ 控制單次最高產能：最多抓 dl_limit 個就收隊
+        if downloaded_count >= dl_limit:
             break
             
         f_url = m.get('audio_url')
@@ -98,7 +106,7 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
         
         if any(b in target_domain for b in my_blacklist): continue
         
-        # 🚀 核心低調邏輯：如果這個網域剛剛才抓過，直接跳過，留給下個梯次的機甲
+        # 🚀 核心低調邏輯：如果這個網域剛剛才抓過，直接跳過
         if target_domain in visited_domains:
             s_log_func(sb, "DOWNLOAD", "INFO", f"🕵️ [低調迴避] 剛才已打擊過 {target_domain}，分散火力，跳過此筆。")
             continue
@@ -110,7 +118,7 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
         tmp_path = f"/tmp/dl_{m['id'][:8]}{ext}"
         
         try:
-            # 🎭 啟動千面人偽裝：拿取這台機甲今天的專屬混搭 Headers！
+            # 🎭 啟動千面人偽裝：拿取專屬混搭 Headers
             dynamic_headers = get_camouflage_headers(worker_id)
             
             with requests.get(f_url, stream=True, timeout=120, headers=dynamic_headers) as r:
@@ -122,15 +130,15 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist):
             sb.table("mission_queue").update({"scrape_status": "completed", "r2_url": os.path.basename(tmp_path)}).eq("id", m['id']).execute()
             s_log_func(sb, "DOWNLOAD", "SUCCESS", f"✅ 物資入庫: {m['id'][:8]}")
             
-            visited_domains.add(target_domain) # 🚀 下載成功後，將此網域加入「已造訪」名單
-            downloaded_count += 1              # 🚀 計數器 +1
+            visited_domains.add(target_domain) 
+            downloaded_count += 1              
             
         except requests.exceptions.HTTPError as he:
             status_code = he.response.status_code
             if status_code in [403, 401, 429]:
                 s_log_func(sb, "DOWNLOAD", "ERROR", f"🚫 [{worker_id}] 遭封鎖 ({status_code})，呼叫 T1 特種救援！")
                 
-                # 🛡️ 指揮官策略：遭受403狀況，以最嚴重事件處理，改為10天 (240小時) 冰封。
+                # 🛡️ 遭受403狀況，以最嚴重事件處理，改為10天 (240小時) 冰封
                 victim_freeze = (datetime.now(timezone.utc) + timedelta(hours=240)).isoformat()
                 ally_freeze = (datetime.now(timezone.utc) + timedelta(hours=240)).isoformat()
                 sb.table("pod_scra_rules").insert([
