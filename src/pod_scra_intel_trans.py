@@ -18,6 +18,8 @@
 # 4. [黃金救援期] 推遲 troop2_start_at 7 天，完美錯開 T2 雷達，精準移交 T1 數位人格處理。
 # 5. 一次拿10個下載名單，抓取2個不同網域伺服器各1個，如果是相同，只抓一個檔案下載。
 # ---------------------------------------------------------
+# [隱蔽] 導入 camouflage 千面人模組，透過身分旗標精準配發迷彩。
+# ---------------------------------------------------------
 
 import os, requests, time, random, gc, json
 from urllib.parse import urlparse
@@ -63,8 +65,9 @@ def execute_fortress_stages(sb, config, s_log_func):
         
         rule_res = sb.table("pod_scra_rules").select("domain").in_("worker_id", [worker_id, "ALL"]).gte("expired_at", now_iso).execute()
         my_blacklist = [r['domain'] for r in rule_res.data] if rule_res.data else []
-        # 將上限 dl_limit 傳入物流引擎
-        run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist, dl_limit) 
+        
+        # 🚀 修正：將上限 dl_limit 以及 身分旗標(is_duty_officer) 傳入物流引擎
+        run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist, dl_limit, is_duty_officer) 
     
     # 轉譯與摘要交替執行 (單數拍 STT, 雙數拍 Summary)
     elif current_tick % 2 != 0:
@@ -79,7 +82,8 @@ def execute_fortress_stages(sb, config, s_log_func):
     health[worker_id] = now_iso
     sb.table("pod_scra_tactics").update({"last_heartbeat_at": now_iso, "workers_health": health, "worker_status": w_status}).eq("id", 1).execute()
 
-def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist, dl_limit=2):
+# 🚀 修正：接收 is_duty_officer 參數
+def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist, dl_limit=2, is_duty_officer=True):
     # 🛡️ 為了尋找「不同網域」的目標，我們先拿多一點候選清單 (limit 10)
     query = sb.table("mission_queue").select("*, mission_program_master(*)").eq("scrape_status", "success").is_("r2_url", "null").lte("troop2_start_at", now_iso).order("created_at", desc=True)\
         .limit(10)  
@@ -118,8 +122,8 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist, dl_limit
         tmp_path = f"/tmp/dl_{m['id'][:8]}{ext}"
         
         try:
-            # 🎭 啟動千面人偽裝：拿取專屬混搭 Headers
-            dynamic_headers = get_camouflage_headers(worker_id)
+            # 🎭 啟動千面人偽裝：🚀 將身分旗標往下傳遞
+            dynamic_headers = get_camouflage_headers(worker_id, is_duty_officer)
             
             with requests.get(f_url, stream=True, timeout=120, headers=dynamic_headers) as r:
                 r.raise_for_status()
