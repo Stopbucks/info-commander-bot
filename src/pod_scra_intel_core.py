@@ -1,11 +1,13 @@
 # ---------------------------------------------------------
-# src/pod_scra_intel_core.py v5.6 (兵工廠與 Jitter 防踩踏版)
+# src/pod_scra_intel_core.py v5.7 (兵工廠與 Jitter 防踩踏版)
 # 適用部隊：ALL (FLY, RENDER, KOYEB, ZEABUR, DBOS, HF)
 # 任務：專注於 STT 與 Summary 的核心戰鬥流程。
 # [新增] 1. COMPRESS_ONLY 兵工廠：壓縮完直接結案。若遇已壓縮檔則自動化身轉譯兵。
 # [新增] 2. 迴圈 Jitter 雜訊：在多檔案處理間加入隨機延遲，防止 API 封鎖與併發衝突。
+# [修改] RENDER 壓縮後，如果檔案低於25MB 把原本只能T1 部隊處理的檔案 ，也交付給 T2
 # ---------------------------------------------------------
 import os, time, random, gc
+from datetime import datetime, timezone  # 💡 補上這一行，確保時間計算不會報錯
 from src.pod_scra_intel_control import get_tactical_panel, get_sb, get_secrets 
 from src.pod_scra_intel_r2 import compress_task_to_opus  
 from src.pod_scra_intel_groqcore import GroqFallbackAgent
@@ -71,6 +73,7 @@ def run_audio_to_stt_mission(sb=None):
 
         print(f"🎯 [{worker_id}] 鎖定目標: {task.get('source_name')} (大小: {task.get('audio_size_mb')}MB)")
 
+
         try:
             # 根據面板權限決定是否壓縮
             if panel["CAN_COMPRESS"] and (r2_url.endswith('.mp3') or r2_url.endswith('.m4a')):
@@ -78,13 +81,41 @@ def run_audio_to_stt_mission(sb=None):
                 success, new_url = compress_task_to_opus(task_id, task['r2_url'])
                 if success:
                     print(f"✅ [{worker_id}] 壓縮成功: {new_url}！")
-                    sb.table("mission_queue").update({"r2_url": new_url, "audio_ext": ".opus", "audio_size_mb": 5}).eq("id", task_id).execute()
+                    
+                    # 💡 核心手術 1：偵測壓縮後的檔案大小 (透過 requests 取得 Header 中的 Content-Length)
+                    compressed_size_mb = 5 # 預設安全值
+                    try:
+                        s = get_secrets()
+                        head_req = requests.head(f"{s['R2_URL']}/{new_url}", timeout=10)
+                        if head_req.status_code == 200 and 'Content-Length' in head_req.headers:
+                            compressed_size_mb = int(head_req.headers['Content-Length']) / (1024 * 1024)
+                            print(f"📏 [{worker_id}] 壓縮後檔案大小偵測: {compressed_size_mb:.2f} MB")
+                    except Exception as e:
+                        print(f"⚠️ [{worker_id}] 無法偵測壓縮後大小，使用預設值 5MB。原因: {e}")
+
+                    # 💡 核心手術 2：依據大小判斷是否撕除 T1 封條，移交 T2
+                    update_payload = {
+                        "r2_url": new_url, 
+                        "audio_ext": ".opus", 
+                        "audio_size_mb": round(compressed_size_mb, 1)
+                    }
+
+                    # 若壓縮後小於 25MB，且此機甲是純兵工廠 (如 RENDER)
+                    if compressed_size_mb < 25.0 and panel.get("COMPRESS_ONLY"):
+                        print(f"🚀 [{worker_id}] 檔案小於 25MB，符合 T2 規格！撕除 T1 封條並解凍！")
+                        update_payload["assigned_troop"] = "T2"
+                        update_payload["troop2_start_at"] = datetime.now(timezone.utc).isoformat()
+                        update_payload["scrape_status"] = "completed" # 確保狀態安全
+
+                    # 執行資料庫更新
+                    sb.table("mission_queue").update(update_payload).eq("id", task_id).execute()
+                    
                     r2_url = new_url.lower()
                     task['r2_url'] = new_url
                     
                     # 🏭 [兵工廠攔截] 壓縮完畢後，若為純壓縮職位，立即跳出結案
                     if panel.get("COMPRESS_ONLY"):
-                        print(f"🏭 [{worker_id}] 兵工廠任務完成！檔案已入庫，交由輕裝部隊轉譯。")
+                        print(f"🏭 [{worker_id}] 兵工廠任務完成！檔案已入庫，交由相關部隊轉譯。")
                         actual_processed += 1
                         continue 
                         
@@ -95,6 +126,7 @@ def run_audio_to_stt_mission(sb=None):
             elif not panel["CAN_COMPRESS"] and (r2_url.endswith('.mp3') or r2_url.endswith('.m4a')):
                 print(f"⛔ [{worker_id}] 權限不足：禁止執行壓縮。跳過此大檔案。")
                 continue
+
 
             chosen_provider = "GROQ" if panel["SCOUT_MODE"] else "GEMINI"
 
