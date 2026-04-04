@@ -6,7 +6,7 @@
 # [新增] 2. 迴圈 Jitter 雜訊：在多檔案處理間加入隨機延遲，防止 API 封鎖與併發衝突。
 # [修改] RENDER 壓縮後，如果檔案低於25MB 把原本只能T1 部隊處理的檔案 ，也交付給 T2
 # ---------------------------------------------------------
-import os, time, random, gc
+import os, time, random, gc, requests  # 💡 核心手術：補上 requests 模組！
 from datetime import datetime, timezone  # 💡 補上這一行，確保時間計算不會報錯
 from src.pod_scra_intel_control import get_tactical_panel, get_sb, get_secrets 
 from src.pod_scra_intel_r2 import compress_task_to_opus  
