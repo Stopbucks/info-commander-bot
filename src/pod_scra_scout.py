@@ -75,9 +75,10 @@ def probe_audio_metadata(url, session):
         if not meta["ext"]:
             meta["ext"] = os.path.splitext(urlparse(url).path)[1].lower() or ".mp3"
 
+        # 此處修改檔案大小判斷
         s, e = meta["size_mb"], meta["ext"]
         if s is not None:
-            if s > 25: meta["skip_reason"] = f"Oversize: {s}MB (Limit 25MB)"
+            if s > 50: meta["skip_reason"] = f"Oversize: {s}MB (Limit 50MB)"
             elif e in [".ogg", ".opus"] and s > 12: meta["skip_reason"] = f"Oversize: {s}MB {e} (Limit 12MB)"
             
     except Exception as e:
