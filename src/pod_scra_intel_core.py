@@ -74,15 +74,21 @@ def run_audio_to_stt_mission(sb=None):
         print(f"🎯 [{worker_id}] 鎖定目標: {task.get('source_name')} (大小: {task.get('audio_size_mb')}MB)")
 
 
+
         try:
+            # 💡 手術一：新增壓縮標記，落實「壓縮與轉譯」的物理級斷開
+            is_compressed_now = False 
+
             # 根據面板權限決定是否壓縮
             if panel["CAN_COMPRESS"] and (r2_url.endswith('.mp3') or r2_url.endswith('.m4a')):
                 print(f"⚙️ [{worker_id}] 面板授權壓縮！啟動 FFmpeg 引擎...")
                 success, new_url = compress_task_to_opus(task_id, task['r2_url'])
                 if success:
                     print(f"✅ [{worker_id}] 壓縮成功: {new_url}！")
+                    is_compressed_now = True
+                    r2_url = new_url.lower() # 更新目前迴圈的 URL 變數為 .opus
                     
-                    # 💡 核心手術 1：偵測壓縮後的檔案大小 (透過 requests 取得 Header 中的 Content-Length)
+                    # 💡 核心偵測：取得壓縮後的檔案大小 (透過 requests)
                     compressed_size_mb = 5 # 預設安全值
                     try:
                         s = get_secrets()
@@ -93,32 +99,23 @@ def run_audio_to_stt_mission(sb=None):
                     except Exception as e:
                         print(f"⚠️ [{worker_id}] 無法偵測壓縮後大小，使用預設值 5MB。原因: {e}")
 
-                    # 💡 核心手術 2：依據大小判斷是否撕除 T1 封條，移交 T2
+                    # 💡 核心更新：將新規格寫入資料庫
                     update_payload = {
                         "r2_url": new_url, 
                         "audio_ext": ".opus", 
                         "audio_size_mb": round(compressed_size_mb, 1)
                     }
 
-                    # 若壓縮後小於 25MB，且此機甲是純兵工廠 (如 RENDER)
-                    if compressed_size_mb < 25.0 and panel.get("COMPRESS_ONLY"):
-                        print(f"🚀 [{worker_id}] 檔案小於 25MB，符合 T2 規格！撕除 T1 封條並解凍！")
+                    # 若壓縮後小於 50MB，確保其具備 T2 兵牌與解凍狀態
+                    if compressed_size_mb < 50.0:
+                        print(f"🚀 [{worker_id}] 壓縮完畢，確保 T2 兵牌與解凍狀態！")
                         update_payload["assigned_troop"] = "T2"
                         update_payload["troop2_start_at"] = datetime.now(timezone.utc).isoformat()
-                        update_payload["scrape_status"] = "completed" # 確保狀態安全
+                        update_payload["scrape_status"] = "completed"
 
-                    # 執行資料庫更新
                     sb.table("mission_queue").update(update_payload).eq("id", task_id).execute()
-                    
-                    r2_url = new_url.lower()
                     task['r2_url'] = new_url
                     
-                    # 🏭 [兵工廠攔截] 壓縮完畢後，若為純壓縮職位，立即跳出結案
-                    if panel.get("COMPRESS_ONLY"):
-                        print(f"🏭 [{worker_id}] 兵工廠任務完成！檔案已入庫，交由相關部隊轉譯。")
-                        actual_processed += 1
-                        continue 
-                        
                 else:
                     print(f"❌ [{worker_id}] 壓縮失敗，觸發容錯推進！")
                     increment_soft_failure(sb, task_id)
@@ -127,10 +124,23 @@ def run_audio_to_stt_mission(sb=None):
                 print(f"⛔ [{worker_id}] 權限不足：禁止執行壓縮。跳過此大檔案。")
                 continue
 
+            # 💡 手術二：壓縮完畢後，無論是誰 (兵工廠或重裝兵)，都強制收隊休息！
+            if is_compressed_now:
+                print(f"🏭 [{worker_id}] 壓縮任務完成。釋放記憶體，將轉譯任務留給下一個節拍或其他友軍！")
+                actual_processed += 1
+                continue # 🚀 強制跳出！絕不貪刀！
 
+            # 💡 手術三：絕對物理防線 (非 Opus 禁入 API 轉譯區)
+            if not r2_url.endswith('.opus'):
+                print(f"🛡️ [{worker_id}] 記憶體保護機制觸發：檔案非 opus 格式 ({r2_url})，嚴禁轉譯！跳過。")
+                continue
+
+            # ==========================================
+            # ⚔️ 以下為 API 呼叫區塊 (保證只有輕量 Opus 能進入)
+            # ==========================================
             chosen_provider = "GROQ" if panel["SCOUT_MODE"] else "GEMINI"
 
-            print(f"🎲 [{worker_id}] 戰術分流 -> [{chosen_provider}]")
+            print(f"🎲 [{worker_id}] 戰術分流 -> [{chosen_provider}] (檔案已確認為輕量 Opus)")
             upsert_intel_status(sb, task_id, "Sum.-proc", chosen_provider)
 
             if chosen_provider == "GROQ":
@@ -155,7 +165,7 @@ def run_audio_to_stt_mission(sb=None):
                     sb.table("mission_queue").update({"r2_url": None, "scrape_status": "pending"}).eq("id", task_id).execute()
                 else:
                     increment_soft_failure(sb, task_id)
-            
+        
         finally:
             gc.collect()
 
