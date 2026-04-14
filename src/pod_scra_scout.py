@@ -1,12 +1,13 @@
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_scout.py v1.1  (隱蔽斥候特遣隊)
+# 本程式碼：src/pod_scra_scout.py v1.2  (隱蔽斥候特遣隊)
 # 任務：1. 智慧 RSS 巡邏 2. 深度 HTML 攻堅 3. 輕量探針 (HEAD) 4. DB 寫入避震
 # [v1.0 誕生] 1. 職責分離：承接原 Officer 的核心解析能力，專精於對外索敵、爬蟲解析與情報建檔。
 # [隱蔽戰術] 智慧排班過濾：update_frequency_days 檢查，未更新節目不處理，# 減少 70% 無效偵察。
 # [防爆戰術] 資料庫避震器：Supabase Insert/Update ，加入 隨機 db_jitter (0.2~0.8秒) ，防鎖死。
 # [降維打擊] 探針型別修復：自動 Content-Length 向下轉型為純整數，根除 22P02 資料庫型別衝突。
 # [戰鬥協議] 延續 RSS 絕對霸權與無效 Slug 攔截，遇 403 封鎖自動上報 ROE 檢舉 (pod_scra_rules)。
-# [偵查數量] 測試期間：4新 +1舊
+# [偵查數量] 測試期間：4新 +1舊 
+# [更新] 修改skip reason 讓GHA(AUDIO_EAT)可以接手大型壓縮任務
 # ---------------------------------------------------------
 
 
@@ -72,18 +73,18 @@ def probe_audio_metadata(url, session):
                 elif 'ogg' in ct: meta["ext"] = ".ogg"
                 elif 'opus' in ct: meta["ext"] = ".opus"
         
+
+
         if not meta["ext"]:
             meta["ext"] = os.path.splitext(urlparse(url).path)[1].lower() or ".mp3"
 
-        # 此處修改檔案大小判斷
-        s, e = meta["size_mb"], meta["ext"]
-        if s is not None:
-            if s > 50: meta["skip_reason"] = f"Oversize: {s}MB (Limit 50MB)"
-            elif e in [".ogg", ".opus"] and s > 12: meta["skip_reason"] = f"Oversize: {s}MB {e} (Limit 12MB)"
+        # 移除檔案大小 Oversize 攔截封條，將判斷交由外部的兵牌分流機制處理
             
     except Exception as e:
         print(f"📡 [探針失效] 無法預測物資規格: {e}")
     return meta
+
+
 
 def execute_rss_recon(sb, current_time, session, alarm_callback):
     """📡 [任務一] 全量 RSS 偵察與智慧排班"""
