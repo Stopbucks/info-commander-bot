@@ -1,13 +1,13 @@
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_scout.py v1.2  (隱蔽斥候特遣隊)
+# 本程式碼：src/pod_scra_scout.py v1.3  (隱蔽斥候特遣隊)
 # 任務：1. 智慧 RSS 巡邏 2. 深度 HTML 攻堅 3. 輕量探針 (HEAD) 4. DB 寫入避震
 # [v1.0 誕生] 1. 職責分離：承接原 Officer 的核心解析能力，專精於對外索敵、爬蟲解析與情報建檔。
-# [隱蔽戰術] 智慧排班過濾：update_frequency_days 檢查，未更新節目不處理，# 減少 70% 無效偵察。
+# [隱蔽戰術] 智慧排班過濾：update_frequency_days 檢查，未更新節目不處理，減少 70% 無效偵察。
 # [防爆戰術] 資料庫避震器：Supabase Insert/Update ，加入 隨機 db_jitter (0.2~0.8秒) ，防鎖死。
 # [降維打擊] 探針型別修復：自動 Content-Length 向下轉型為純整數，根除 22P02 資料庫型別衝突。
 # [戰鬥協議] 延續 RSS 絕對霸權與無效 Slug 攔截，遇 403 封鎖自動上報 ROE 檢舉 (pod_scra_rules)。
 # [偵查數量] 測試期間：4新 +1舊 
-# [更新] 修改skip reason 讓GHA(AUDIO_EAT)可以接手大型壓縮任務
+# [v1.3 更新] 拔除探針封條限制，實裝智能兵牌分流：>50MB 檔案自動發配 AUDIO_EAT 兵牌交由重裝處理。
 # ---------------------------------------------------------
 
 
@@ -58,7 +58,7 @@ def log_recon_failure(sb, task_id, provider, program_name, error_msg):
         print(f"⚠️ [日誌紀錄失敗]: {e}")
 
 def probe_audio_metadata(url, session):
-    """🚀 [連線池探針] 獲取音檔規格"""
+    """🚀 [連線池探針] 獲取音檔規格 (V1.3 已拔除超載封印，不再主動 skip)"""
     meta = {"size_mb": None, "ext": None, "skip_reason": None}
     try:
         with session.head(url, allow_redirects=True, timeout=5) as r:
@@ -73,18 +73,14 @@ def probe_audio_metadata(url, session):
                 elif 'ogg' in ct: meta["ext"] = ".ogg"
                 elif 'opus' in ct: meta["ext"] = ".opus"
         
-
-
         if not meta["ext"]:
             meta["ext"] = os.path.splitext(urlparse(url).path)[1].lower() or ".mp3"
 
-        # 移除檔案大小 Oversize 攔截封條，將判斷交由外部的兵牌分流機制處理
+        # 💡 [V1.3 移除] 檔案大小攔截封條已移除。現在不管檔案多大，都交由兵牌分流決定！
             
     except Exception as e:
         print(f"📡 [探針失效] 無法預測物資規格: {e}")
     return meta
-
-
 
 def execute_rss_recon(sb, current_time, session, alarm_callback):
     """📡 [任務一] 全量 RSS 偵察與智慧排班"""
@@ -116,7 +112,13 @@ def execute_rss_recon(sb, current_time, session, alarm_callback):
                         
                         wait_days = s.get("wait_days") or 0
                         t2_start = (current_time + timedelta(days=wait_days)).isoformat()
-                        assigned = "T1" if wait_days > 0 else "T2"
+                        
+                        # 💡 [V1.3 智能兵牌] 依照檔案大小進行分流
+                        if meta["size_mb"] and meta["size_mb"] > 50:
+                            assigned = "AUDIO_EAT"
+                            print(f"🚜 [兵牌發配] {s['program_name']} 達 {meta['size_mb']}MB，已打上 AUDIO_EAT 專屬兵牌！")
+                        else:
+                            assigned = "T1" if wait_days > 0 else "T2"
 
                         payload = {
                             "source_name": s["program_name"], "audio_url": audio_url,
@@ -227,7 +229,13 @@ def execute_html_recon(sb, current_time, session, provider_key, persona_label, a
                     meta = probe_audio_metadata(f_audio, session) 
                     wait_days = master.get("wait_days") if master else 0
                     t2_start = (current_time + timedelta(days=wait_days)).isoformat()
-                    assigned = "T1" if wait_days > 0 else "T2"
+                    
+                    # 💡 [V1.3 智能兵牌] 依照檔案大小進行分流
+                    if meta["size_mb"] and meta["size_mb"] > 50:
+                        assigned = "AUDIO_EAT"
+                        print(f"🚜 [兵牌發配] {source_name} 達 {meta['size_mb']}MB，已打上 AUDIO_EAT 專屬兵牌！")
+                    else:
+                        assigned = "T1" if wait_days > 0 else "T2"
 
                     db_jitter()
                     sb.table("mission_queue").update({
