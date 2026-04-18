@@ -21,7 +21,8 @@
 # [隱蔽] 導入 camouflage 千面人模組，透過身分旗標精準配發迷彩。
 # ---------------------------------------------------------
 
-import os, requests, time, random, gc, json
+import os, time, random, gc, json
+from curl_cffi import requests # 🚀 換裝！
 from urllib.parse import urlparse
 from datetime import datetime, timezone, timedelta
 from src.pod_scra_intel_r2 import get_s3_client 
@@ -121,18 +122,20 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist, dl_limit
         ext = os.path.splitext(urlparse(f_url).path)[1] or ".mp3"
         tmp_path = f"/tmp/dl_{m['id'][:8]}{ext}"
         
-        try:
 
+        try:
             dynamic_headers = get_camouflage_headers(worker_id, is_duty_officer)
-            
-            # 💡 黃金比例：timeout=180s, 切片 3MB, 喘息 0.5s
-            with requests.get(f_url, stream=True, timeout=180, headers=dynamic_headers) as r:
-                r.raise_for_status()
-                with open(tmp_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=3 * 1024 * 1024): # 3MB 切片
-                        if chunk: # 確保有資料才寫入
-                            f.write(chunk)
-                            time.sleep(0.5) # 💡 極限擬人化：模擬 4G 網路真實緩衝降速
+
+            # 🚀 戰術升級：使用 Session 處理多次跳轉，並加上 safari15_3 完美指紋
+            with requests.Session(impersonate="safari15_3") as session:
+                # 💡 黃金比例：timeout=180s, 切片 3MB, 喘息 0.5s
+                with session.get(f_url, stream=True, timeout=180, headers=dynamic_headers) as r:
+                    r.raise_for_status()
+                    with open(tmp_path, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=3 * 1024 * 1024): 
+                            if chunk: 
+                                f.write(chunk)
+                                time.sleep(0.5)
                     
             s3.upload_file(tmp_path, bucket, os.path.basename(tmp_path))
             
