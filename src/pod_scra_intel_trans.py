@@ -124,51 +124,42 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist, dl_limit
         
 
         try:
-            dynamic_headers = get_camouflage_headers(worker_id, is_duty_officer)
 
-            # 🚀 戰術升級：使用 Session 處理多次跳轉，並加上 safari15_3 完美指紋
-            with requests.Session(impersonate="safari15_3") as session:
-                # 💡 黃金比例：timeout=180s, 切片 3MB, 喘息 0.5s
-                with session.get(f_url, stream=True, timeout=180, headers=dynamic_headers) as r:
+            # 🚀 核心擬態：向迷彩庫申請【成套】動態偽裝
+            camo_gear = get_tactical_camouflage(worker_id, is_duty_officer)
+            dynamic_headers = camo_gear["headers"]
+            tls_fingerprint = camo_gear["impersonate"]
+            
+            # 🚀 戰術升級：使用動態配對的 TLS 指紋啟動 Session，達成表裡一致
+            with requests.Session(impersonate=tls_fingerprint) as session:
+                # 💡 拆除 __enter__ 炸彈：不使用 with，改為直接賦值
+                r = session.get(f_url, stream=True, timeout=180, headers=dynamic_headers)
+                try:
                     r.raise_for_status()
                     with open(tmp_path, 'wb') as f:
+                        # 💡 3MB 分片下載，每片休息 0.5s，規避流量異常偵測
                         for chunk in r.iter_content(chunk_size=3 * 1024 * 1024): 
                             if chunk: 
                                 f.write(chunk)
-                                time.sleep(0.5)
+                                time.sleep(0.5) 
+                finally:
+                    # 💡 安全收尾：明確關閉連線
+                    r.close()
                     
             s3.upload_file(tmp_path, bucket, os.path.basename(tmp_path))
-            
-            sb.table("mission_queue").update({
-                "scrape_status": "completed", 
-                "r2_url": os.path.basename(tmp_path)
-            }).eq("id", m['id']).execute()
-            
-            s_log_func(sb, "DOWNLOAD", "SUCCESS", f"✅ 物資入庫 (安全擴容至 50MB): {m['id'][:8]}")
-
-            visited_domains.add(target_domain) 
-            downloaded_count += 1              
+            sb.table("mission_queue").update({"scrape_status": "completed", "r2_url": os.path.basename(tmp_path)}).eq("id", m['id']).execute()
+            s_log_func(sb, "DOWNLOAD", "SUCCESS", f"✅ 物資入庫: {m['id'][:8]}")
             
         except requests.exceptions.HTTPError as he:
-            status_code = he.response.status_code
+            status_code = getattr(he.response, 'status_code', 0)
             if status_code in [403, 401, 429]:
-                s_log_func(sb, "DOWNLOAD", "ERROR", f"🚫 [{worker_id}] 遭封鎖 ({status_code})，呼叫 T1 特種救援！")
-                
-                # 🛡️ 遭受403狀況，以最嚴重事件處理，改為10天 (240小時) 冰封
-                victim_freeze = (datetime.now(timezone.utc) + timedelta(hours=240)).isoformat()
-                ally_freeze = (datetime.now(timezone.utc) + timedelta(hours=240)).isoformat()
+                s_log_func(sb, "DOWNLOAD", "ERROR", f"🚫 [{worker_id}] 遭封鎖 ({status_code})")
+                victim_freeze = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+                ally_freeze = (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat()
                 sb.table("pod_scra_rules").insert([
                     {"worker_id": worker_id, "domain": target_domain, "rule_type": "AUTO_COOLDOWN", "expired_at": victim_freeze},
                     {"worker_id": "ALL", "domain": target_domain, "rule_type": "VIGILANCE", "expired_at": ally_freeze}
                 ]).execute()
-
-                rescue_time = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
-                sb.table("mission_queue").update({
-                    "assigned_troop": "T1_RESCUE", 
-                    "troop2_start_at": rescue_time, 
-                    "scrape_status": "pending" 
-                }).eq("id", m['id']).execute()
-                
             else:
                 s_log_func(sb, "DOWNLOAD", "ERROR", f"❌ 搬運異常: {status_code}")
         except Exception as e: 
