@@ -306,7 +306,7 @@ def run_stt_to_summary_mission(sb=None):
             
             else:
                 print(f"🔄 [{worker_id}] 任務異常，保留失敗標記，等待下次重試。")
-                upsert_intel_status(sb, task_id, "Sum.-pre", provider)
+                # upsert_intel_status(sb, task_id, "Sum.-pre", provider) 註解本行，預防再度掉落死迴圈
         
         finally:
             gc.collect()
