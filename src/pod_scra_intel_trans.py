@@ -26,8 +26,7 @@ from curl_cffi import requests # 🚀 換裝！
 from urllib.parse import urlparse
 from datetime import datetime, timezone, timedelta
 from src.pod_scra_intel_r2 import get_s3_client 
-from src.pod_scra_intel_control import get_tactical_panel # 🚀 引入控制面板
-from src.pod_scra_intel_camouflage import get_camouflage_headers # 🚀 引入千面人偽裝模組
+from src.pod_scra_intel_camouflage import get_tactical_camouflage # 👈 更新動態HEADER名稱呼叫
 
 def execute_fortress_stages(sb, config, s_log_func):
     now_iso = datetime.now(timezone.utc).isoformat()
