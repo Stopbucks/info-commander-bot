@@ -26,7 +26,8 @@ from curl_cffi import requests # 🚀 換裝！
 from urllib.parse import urlparse
 from datetime import datetime, timezone, timedelta
 from src.pod_scra_intel_r2 import get_s3_client 
-from src.pod_scra_intel_camouflage import get_tactical_camouflage # 👈 更新動態HEADER名稱呼叫
+from src.pod_scra_intel_camouflage import get_tactical_camouflage
+from src.pod_scra_intel_control import get_tactical_panel # 👈 🚨 新增這行：補齊控制面板的引入
 
 def execute_fortress_stages(sb, config, s_log_func):
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -145,10 +146,14 @@ def run_logistics_engine(sb, config, now_iso, s_log_func, my_blacklist, dl_limit
                     # 💡 安全收尾：明確關閉連線
                     r.close()
                     
+            # 👇👇👇 往左退一格縮排，讓 Session 提早關閉釋放記憶體 👇👇👇
             s3.upload_file(tmp_path, bucket, os.path.basename(tmp_path))
             sb.table("mission_queue").update({"scrape_status": "completed", "r2_url": os.path.basename(tmp_path)}).eq("id", m['id']).execute()
             s_log_func(sb, "DOWNLOAD", "SUCCESS", f"✅ 物資入庫: {m['id'][:8]}")
+            # 👆👆👆 ========================================= 👆👆👆
             
+
+
         except requests.exceptions.HTTPError as he:
             status_code = getattr(he.response, 'status_code', 0)
             if status_code in [403, 401, 429]:
