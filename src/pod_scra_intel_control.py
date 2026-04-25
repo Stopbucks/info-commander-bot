@@ -86,8 +86,8 @@ def get_tactical_panel(worker_id):
     factory_panel = {
         "MEM_TIER": 512,
         "RADAR_FETCH_LIMIT": 100,
-        "STT_LIMIT": 10,                 # 檔案壓縮：2026_0404 原本 3 個，提升至 6 (0406:10個)            
-        "SUMMARY_LIMIT": 2,           
+        "STT_LIMIT": 8,                 # 檔案壓縮            
+        "SUMMARY_LIMIT": 4,           
         "SAFE_DURATION_SECONDS": 1500,
         "CAN_COMPRESS": True,         
         "COMPRESS_ONLY": True,        

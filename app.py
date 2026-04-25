@@ -1,10 +1,9 @@
 # ---------------------------------------------------------
-# app.py (V5.5 主力極簡淨化與非同步防禦版)
-# 適用：RENDER, KOYEB, ZEABUR, FLY, HF, DBOS | 規格：全軍通用
-# [工作流程] 每 2 小時執行一次任務，透過「初始隨機延遲 + 排程器 Jitter」錯開起跑線，避免羊群效應。
-# [工作流程] 本程式負責排程喚醒與連線保活，其他交由src/pod_scra_intel_trans.py  與 control.py 面板動態統御。
-# [修正] 1. 徹底拔除轉譯白名單與冗餘參數，對接 V5.5 狀態機。
-# [新增] 2. 植入 db_jitter 微延遲避震器，並套用至日誌與錯誤回報，避免併發競合寫入 (Race Condition)。
+# app.py (RENDER 專用：V6.0 內部排程器防禦版)
+# 適用：RENDER (具備自我喚醒能力)
+# [工作流程] 每 2 小時執行一次任務，透過「初始隨機延遲 + 排程器 Jitter」避開併發。
+# [V6.0 升級] 1. 解除致命崩潰消音器，確保 OOM 等底層錯誤能正確印出。
+# [V6.0 升級] 2. Watchdog 設為 3600 秒，完美涵蓋 2700s (45分鐘) 的 10檔壓縮極限測試。
 # ---------------------------------------------------------
 import os, time, gc, random, threading, traceback
 from datetime import datetime, timezone, timedelta
@@ -24,7 +23,7 @@ CONFIG = {
 
 MISSION_LOCK = threading.Lock()
 MISSION_STATE = {"is_running": False, "start_time": 0.0}
-WATCHDOG_TIMEOUT = 3600  
+WATCHDOG_TIMEOUT = 3600  # 🛡️ 1 小時防死鎖，足以涵蓋壓縮極限測試的 45 分鐘
 
 def get_sb(): 
     return create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
@@ -36,7 +35,7 @@ def db_jitter():
 def s_log(sb, task_type, status, message, err_stack=None):
     try:
         print(f"[{task_type}][{status}] {message}", flush=True)
-        if status in ["SUCCESS", "ERROR"] or "啟動" in message or "V5.5" in message:
+        if status in ["SUCCESS", "ERROR"] or "啟動" in message or "V6.0" in message:
             db_jitter()  # 👈 寫入前閃避
             sb.table("mission_logs").insert({
                 "worker_id": CONFIG["WORKER_ID"], "task_type": task_type,
@@ -45,6 +44,8 @@ def s_log(sb, task_type, status, message, err_stack=None):
     except: pass
 
 def report_soft_failure(sb, worker_id, error_msg):
+    # 🚨 [V6.0 升級] 解除消音器：強制在面板印出致命錯誤，避免機甲死得不明不白！
+    print(f"🔥 [致命崩潰] 機甲發生未預期異常: {error_msg}", flush=True)
     try:
         db_jitter()  # 👈 讀取前閃避
         res = sb.table("pod_scra_tactics").select("active_worker, consecutive_soft_failures, worker_status").eq("id", 1).single().execute()
@@ -75,8 +76,8 @@ def run_integrated_mission():
     MISSION_STATE["start_time"] = time.time()
     
     try:
-        s_log(sb, "SYSTEM", "SUCCESS", f"🚀 [{CONFIG['WORKER_ID']} V5.5] 大部隊連線，低耦合容錯防禦就位！")
-        # 🚀 致命錯誤已排除：對接 V5.5 狀態機，精準傳入 3 個參數
+        s_log(sb, "SYSTEM", "SUCCESS", f"🚀 [{CONFIG['WORKER_ID']} V6.0] 內部排程器啟動，大部隊連線就位！")
+        # 呼叫 V6.0 狀態機
         execute_fortress_stages(sb, CONFIG, s_log)
         
     except Exception as e:
@@ -89,10 +90,11 @@ def run_integrated_mission():
         del sb; gc.collect()
 
 @app.route('/')
-def health(): return f"Fortress {CONFIG['WORKER_ID']} V5.5 Active", 200
+def health(): return f"Fortress {CONFIG['WORKER_ID']} V6.0 Active", 200
 
 @app.route('/ping')
 def trigger():
+    """保留外部 Ping 觸發能力作為備用，雙重保險"""
     global MISSION_STATE
     token = request.args.get('token')
     if not token or token != CONFIG['CRON_SECRET']: return "Unauthorized", 401
