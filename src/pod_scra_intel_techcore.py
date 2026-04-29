@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# src/pod_scra_intel_techcore.py v6.0 (中型部隊專用：GROQ升級長訪談_純 REST + curl_cffi 升級版)
+# src/pod_scra_intel_techcore.py v6.1 (中型部隊專用：GROQ升級長訪談_純 REST + curl_cffi 升級版)
 # 職責：1. [雷達] fetch_stt_tasks：對接 Supabase 智能檢視表，進行三級分流與兵牌隔離。
 #       2. [容錯] increment_soft_failure：處理失敗不墜機，打上標記交接重裝。
 #       3. [火力] 封裝 Supabase 讀寫、REST API 呼叫與 TG 戰報。
@@ -7,6 +7,7 @@
 # [V5.9.5 更新] 核心連線套件全面升級為 curl_cffi，提升 HTTP/2 連線穩定度。
 # [V6.0   更新] 採用GROQ執行長訪談逐字稿，交GEMINI摘要。輕裝游擊隊(FLY)加裝防禦網。
 # 適用：RENDER, KOYEB, ZEABUR (純 REST 輕快版，無 SDK 依賴)
+# [V6.1] 新增def send_tg_report(secrets,..)顯示 AI 提供者
 # ---------------------------------------------------------
 import base64, re, gc, os
 from datetime import datetime
@@ -160,15 +161,18 @@ def call_gemini_summary(secrets, r2_url_path, sys_prompt):
         err_msg = ai_resp.text[:200] 
         raise Exception(f"Gemini API 拒絕存取 (HTTP {ai_resp.status_code}): {err_msg}")
 
-def send_tg_report(secrets, source, title, summary, sb=None, worker_id="UNKNOWN"):
+
+def send_tg_report(secrets, source, title, summary, sb=None, worker_id="UNKNOWN", provider="AUTO"):
     safe_summary = summary[:3800] + ("...\n(因字數限制截斷)" if len(summary) > 3800 else "")
     safe_source = str(source).replace("_", "＿").replace("*", "＊").replace("[", "〔").replace("]", "〕").replace("`", "‵")
     safe_title = str(title).replace("_", "＿").replace("*", "＊").replace("[", "〔").replace("]", "〕").replace("`", "‵")
-    report_msg = f"🎙️ *{safe_source}*\n📌 *{safe_title}*\n\n{safe_summary}"
+    
+    # 💡 組合 TG 訊息時，新增一行顯示 provider (AI 供應商)
+    report_msg = f"🎙️ *{safe_source}*\n📌 *{safe_title}*\n🧠 *戰術核心*: {provider}\n\n{safe_summary}"
     
     url = f"https://api.telegram.org/bot{secrets['TG_TOKEN']}/sendMessage"
     payload = {"chat_id": secrets["TG_CHAT"], "text": report_msg, "parse_mode": "Markdown"}
-    
+
     try:
         resp = requests.post(url, json=payload, timeout=15)
         if resp.status_code != 200:
