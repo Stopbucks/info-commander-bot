@@ -86,13 +86,13 @@ def get_tactical_panel(worker_id):
     factory_panel = {
         "MEM_TIER": 512,
         "RADAR_FETCH_LIMIT": 100,
-        "STT_LIMIT": 3,                 # 檔案壓縮   (04_29從8個改為3個，給PA測試)         
-        "SUMMARY_LIMIT": 4,           
+        "STT_LIMIT": 2,                 # 檔案壓縮   (04_29從8個改為3個，給PA測試)         
+        "SUMMARY_LIMIT": 2,           
         "SAFE_DURATION_SECONDS": 1500,
         "CAN_COMPRESS": True,         
         "COMPRESS_ONLY": True,        
         "SCOUT_MODE": False,
-        "MAX_TICKS": 8,
+        "MAX_TICKS": 4,                 # 05/05 齒輪轉速，從8檔，更動為4檔
         "IDLE_GEARBOX": 4.0           # ⚙️ 隱蔽變速箱：非值勤時的巡邏降速齒輪
     }
 
