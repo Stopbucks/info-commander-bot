@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from supabase import create_client, Client
 import pod_scra_scout  # 🚀 引入斥候部隊
 
-ACTIVE_STRATEGY = 2 
+ACTIVE_STRATEGY = 1 
 STRATEGY_MAP = {
     1: {"provider": "SCRAPERAPI", "label": "Win11_Chrome_Premium", "key_name": "SCRAP_API_KEY_V2"},
     2: {"provider": "WEBSCRAPING", "label": "Win11_Chrome_WebScraping", "key_name": "WEBSCRAPING_API_KEY"},

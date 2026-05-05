@@ -1,16 +1,8 @@
-
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_logistics.py v7.2 (雙軌救援特種武裝版)
+# 本程式碼：src/pod_scra_logistics.py v7.3 (智能網域分流版)
 # 任務：1. 雙軌下載：常規 T2 支援 + T1_RESCUE 403 破門救援
 #       2. 403 檢舉與規避 3. 擬人化偽裝
-# [v7.2 升級] 加入對 assigned_troop == 'T1_RESCUE' 的優先強制接管邏輯。
-#
-# [聯合作戰交接流程 (T1 & T2 雙軌分流)]
-# 1. T2 前鋒敗戰轉移：當 T2 (trans.py) 遭遇 403，會將 mission_queue 的 assigned_troop 改為 'T1_RESCUE'。
-# 2. 7 天黃金救援期：T2 將 troop2_start_at 推遲 7 天，並把 scrape_status 降回 'pending'，使 T2 雷達強制盲化。
-# 3. T1 破門接管 (軌道 A)：本程式優先監聽 'T1_RESCUE'，無視時間限制，啟動數位人格強勢接管 403 任務。
-# 4. T1 常規支援 (軌道 B)：本程式亦會撿拾 assigned_troop == 'T2' 且時間已達標的遺漏任務，作為安全網。
-# 5. 全域網域避戰：雙方遇 403 皆會寫入 pod_scra_rules (設定過期日)，防止同節點對該 domain 重複送死。
+# [v7.3 升級] 加入「智能網域分流」機制：擴大掃描池，強制挑選相異網域下載，徹底避開重複敲擊。
 # ---------------------------------------------------------
 
 import os, time, random, requests, boto3, subprocess, json
@@ -40,7 +32,7 @@ def compress_audio(input_path, output_path):
     except: return False
 
 def run_logistics_mission():
-    NEW_LIMIT, OLD_LIMIT = 2, 1
+    TARGET_LIMIT = 3 # 🎯 總計最多挑選 3 個不同網域的任務
     SLEEP_MIN, SLEEP_MAX = 180, 360
     
     sb = get_sb(); s3 = get_s3(); bucket = get_secret("R2_BUCKET_NAME")
@@ -50,38 +42,44 @@ def run_logistics_mission():
     rule_res = sb.table("pod_scra_rules").select("domain").eq("worker_id", "GITHUB_LOGISTICS").execute()
     my_blacklist = [r['domain'] for r in rule_res.data] if rule_res.data else []
 
-    # 🚀 雙軌查詢邏輯 (Dual Track)
-    # 軌道 A: [特種救援] 優先攔截被 T2 退貨的 T1_RESCUE 任務 (無視 troop2_start_at 時間限制)
+    # 🚀 雙軌查詢邏輯 (擴大掃描池至 15 筆，方便後續篩選相異網域)
     rescue_query = sb.table("mission_queue").select("*")\
                    .eq("scrape_status", "pending")\
                    .eq("assigned_troop", "T1_RESCUE")\
-                   .order("created_at", desc=False).limit(2).execute()
+                   .order("created_at", desc=False).limit(10).execute()
     
-    # 軌道 B: [常規支援] 撿取 T2 未處理的舊任務
     regular_query = sb.table("mission_queue").select("*")\
                     .eq("scrape_status", "success")\
                     .eq("assigned_troop", "T2")\
                     .lte("troop2_start_at", now_iso)\
-                    .order("created_at", desc=False).limit(OLD_LIMIT).execute()
+                    .order("created_at", desc=False).limit(5).execute()
     
-    download_list = (rescue_query.data or []) + (regular_query.data or [])
+    raw_list = (rescue_query.data or []) + (regular_query.data or [])
+
+    # 🛡️ 智能網域分流：從候選名單中，挑選網域不重複的任務
+    download_list = []
+    visited_domains = set(my_blacklist) # 預先把黑名單當作已造訪過
+    
+    for task in raw_list:
+        target_domain = urlparse(task['audio_url']).netloc
+        if target_domain not in visited_domains:
+            download_list.append(task)
+            visited_domains.add(target_domain) # 加入集合，同網域下一個就會被跳過
+        
+        if len(download_list) >= TARGET_LIMIT:
+            break
 
     if download_list:
-        print(f"🚛 [物流啟動] 準備搬運 {len(download_list)} 筆物資 (包含特種救援)...")
+        print(f"🚛 [物流啟動] 經智能分流，選定 {len(download_list)} 筆相異網域物資準備搬運...")
         for idx, task in enumerate(download_list):
             task_id, audio_url = task['id'], task['audio_url']
             target_domain = urlparse(audio_url).netloc
             troop_type = task.get("assigned_troop", "UNKNOWN")
-            
-            # 🛡️ 戰術規避
-            if any(b in target_domain for b in my_blacklist):
-                print(f"⏩ [避戰] {target_domain} 處於黑名單，跳過。")
-                continue
 
             try:
                 print(f"🎯 [鎖定] 任務類型: {troop_type} | 來源: {target_domain}")
-                file_name = f"{datetime.now().strftime('%Y%m%d')}_{task_id[:8]}.opus"
-                raw_path, opus_path = f"/tmp/raw_{task_id}", f"/tmp/{file_name}"
+                file_name = f"{datetime.now().strftime('%Y%m%d')}_{str(task_id)[:8]}.opus"
+                raw_path, opus_path = f"/tmp/raw_{str(task_id)[:8]}", f"/tmp/{file_name}"
                 
                 # 🚀 偽裝下載
                 with requests.get(audio_url, stream=True, timeout=180, headers=get_headers()) as r:
@@ -107,7 +105,7 @@ def run_logistics_mission():
                 
             if idx < len(download_list) - 1: time.sleep(random.randint(SLEEP_MIN, SLEEP_MAX))
     else:
-        print("☕ [待命] 目前無 T2 支援任務或 T1 救援任務。")
+        print("☕ [待命] 目前無適合且不在黑名單內的 T2 支援任務或 T1 救援任務。")
 
 if __name__ == "__main__":
     run_logistics_mission()
