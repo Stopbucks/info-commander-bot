@@ -1,3 +1,4 @@
+
 # ---------------------------------------------------------
 # 本程式碼：src/pod_scra_logistics.py v7.3 (智能網域分流版)
 # 任務：1. 雙軌下載：常規 T2 支援 + T1_RESCUE 403 破門救援
@@ -31,6 +32,14 @@ def compress_audio(input_path, output_path):
         return True
     except: return False
 
+def get_root_domain(url):
+    """提取主網域，將 a.libsyn.com 和 b.libsyn.com 歸類為相同的 libsyn.com"""
+    domain = urlparse(url).netloc
+    parts = domain.split('.')
+    if len(parts) > 2:
+        return ".".join(parts[-2:])
+    return domain
+
 def run_logistics_mission():
     TARGET_LIMIT = 3 # 🎯 總計最多挑選 3 個不同網域的任務
     SLEEP_MIN, SLEEP_MAX = 180, 360
@@ -40,19 +49,20 @@ def run_logistics_mission():
     
     # 🕵️ 領取黑名單：確保不重複踩雷
     rule_res = sb.table("pod_scra_rules").select("domain").eq("worker_id", "GITHUB_LOGISTICS").execute()
-    my_blacklist = [r['domain'] for r in rule_res.data] if rule_res.data else []
+    # 將黑名單轉換為主網域格式
+    my_blacklist = [get_root_domain(f"http://{r['domain']}") for r in rule_res.data] if rule_res.data else []
 
-    # 🚀 雙軌查詢邏輯 (擴大掃描池至 15 筆，方便後續篩選相異網域)
+    # 🚀 雙軌查詢邏輯 (擴大掃描池20 +20 筆，方便後續篩選相異網域)
     rescue_query = sb.table("mission_queue").select("*")\
                    .eq("scrape_status", "pending")\
                    .eq("assigned_troop", "T1_RESCUE")\
-                   .order("created_at", desc=False).limit(10).execute()
+                   .order("created_at", desc=False).limit(20).execute()
     
     regular_query = sb.table("mission_queue").select("*")\
                     .eq("scrape_status", "success")\
                     .eq("assigned_troop", "T2")\
                     .lte("troop2_start_at", now_iso)\
-                    .order("created_at", desc=False).limit(5).execute()
+                    .order("created_at", desc=False).limit(20).execute()
     
     raw_list = (rescue_query.data or []) + (regular_query.data or [])
 
@@ -61,10 +71,11 @@ def run_logistics_mission():
     visited_domains = set(my_blacklist) # 預先把黑名單當作已造訪過
     
     for task in raw_list:
-        target_domain = urlparse(task['audio_url']).netloc
-        if target_domain not in visited_domains:
+        root_domain = get_root_domain(task['audio_url'])
+        
+        if root_domain not in visited_domains:
             download_list.append(task)
-            visited_domains.add(target_domain) # 加入集合，同網域下一個就會被跳過
+            visited_domains.add(root_domain) # 加入集合，同網域下一個就會被跳過
         
         if len(download_list) >= TARGET_LIMIT:
             break
