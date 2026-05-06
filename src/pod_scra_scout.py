@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# 本程式碼：src/pod_scra_scout.py v1.3  (隱蔽斥候特遣隊)
+# 本程式碼：src/pod_scra_scout.py v1.5  (隱蔽斥候特遣隊 - 參數化模組版)
 # 任務：1. 智慧 RSS 巡邏 2. 深度 HTML 攻堅 3. 輕量探針 (HEAD) 4. DB 寫入避震
 # [v1.0 誕生] 1. 職責分離：承接原 Officer 的核心解析能力，專精於對外索敵、爬蟲解析與情報建檔。
 # [隱蔽戰術] 智慧排班過濾：update_frequency_days 檢查，未更新節目不處理，減少 70% 無效偵察。
@@ -7,9 +7,9 @@
 # [降維打擊] 探針型別修復：自動 Content-Length 向下轉型為純整數，根除 22P02 資料庫型別衝突。
 # [戰鬥協議] 延續 RSS 絕對霸權與無效 Slug 攔截，遇 403 封鎖自動上報 ROE 檢舉 (pod_scra_rules)。
 # [偵查數量] 測試期間：4新 +1舊 
-# [v1.3 更新] 拔除探針封條限制，實裝智能兵牌分流：>50MB 檔案自動發配 AUDIO_EAT 兵牌交由重裝處理。
+# [v1.4 升級] 導入「體量與時效雙重閘門」，強制將 <35MB 的任務分配給 T2，平衡 T1/T2 兵力比例。
+# [v1.5 重構] 導入「戰術分流指揮中心」，將所有閥值參數化，集中於頂部面板，大幅提升未來維護與動態調撥的靈活性。
 # ---------------------------------------------------------
-
 
 import os, time, random, json, feedparser
 from urllib.parse import urlparse 
@@ -17,7 +17,19 @@ from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 from pod_scra_scanner import fetch_html
 
-# 🚀 [戰場搶修]：必須把武器庫配發給 Scout，它才能在戰場上自動換槍！
+# =========================================================
+# 🎛️ 戰術分流指揮中心 (Tactical Dispatch Center)
+# =========================================================
+# [未來維護指南] 
+# 若 T2(PA/FLY) 大塞車，請降低 T2_MAX_MB (例如降到 20)，將更多任務溢流給 T1(GHA)。
+# 若 T1(GHA) 大塞車，請提高 T2_MAX_MB (例如升到 40)，強迫 T2 吃下更多中型任務。
+# 若重型任務太多，可調低 AUDIO_EAT_THRESHOLD (例如降到 45)。
+# =========================================================
+
+T2_MAX_MB = 35               # 🛡️ 輕裝部隊 (T2) 強制承接的極限體量 (單位: MB)。<=此值一律交給 T2。
+AUDIO_EAT_THRESHOLD = 50     # 🚜 重裝怪獸 (AUDIO_EAT) 的起跳閥值 (單位: MB)。>此值一律放生。
+
+# 🚀 [戰場搶修] 武器庫配發
 ACTIVE_STRATEGY = 2 
 STRATEGY_MAP = {
     1: {"provider": "SCRAPERAPI", "label": "Win11_Chrome_Premium", "key_name": "SCRAP_API_KEY_V2"},
@@ -26,6 +38,33 @@ STRATEGY_MAP = {
     4: {"provider": "HASDATA", "label": "Win11_Chrome_HasData", "key_name": "HASDATA_API_KEY"},
     5: {"provider": "SCRAPINGANT", "label": "Win11_Chrome_Ant", "key_name": "SCRAPINGANT_API_KEY"}
 }
+
+def determine_troop_assignment(size_mb, wait_days):
+    """
+    🛡️ [核心決策引擎] 根據體量與時效，動態配發兵牌
+    參數化設計：依賴頂部的 T2_MAX_MB 與 AUDIO_EAT_THRESHOLD 進行決策。
+    """
+    if size_mb is None:
+        # 盲測狀況：保守派發。急件給 T2 試水溫，非急件給 T1 穩穩抓。
+        return "T1" if wait_days > 0 else "T2"
+        
+    if size_mb > AUDIO_EAT_THRESHOLD:
+        # [怪獸級] ＞ 50MB 
+        return "AUDIO_EAT"
+        
+    elif size_mb <= T2_MAX_MB:
+        # [輕中量級] ≦ 35MB：強制交給 T2 (PA/FLY) 消化，以平衡 T1 壓力。
+        return "T2"
+        
+    else:
+        # [中重量級] 35MB ~ 50MB：進入彈性調度區
+        # 若為急件 (wait_days == 0)，強迫 T2 越級打怪。
+        # 若非急件 (wait_days > 0)，交給 T1(GHA) 慢工出細活。
+        return "T1" if wait_days > 0 else "T2"
+
+# =========================================================
+# ⚙️ 以下為底層執行邏輯，非必要勿動
+# =========================================================
 
 def get_secret(key, default=None):
     v_path = "/etc/secrets/render_secret_vault.json"
@@ -58,7 +97,7 @@ def log_recon_failure(sb, task_id, provider, program_name, error_msg):
         print(f"⚠️ [日誌紀錄失敗]: {e}")
 
 def probe_audio_metadata(url, session):
-    """🚀 [連線池探針] 獲取音檔規格 (V1.3 已拔除超載封印，不再主動 skip)"""
+    """🚀 [連線池探針] 獲取音檔規格"""
     meta = {"size_mb": None, "ext": None, "skip_reason": None}
     try:
         with session.head(url, allow_redirects=True, timeout=5) as r:
@@ -75,8 +114,6 @@ def probe_audio_metadata(url, session):
         
         if not meta["ext"]:
             meta["ext"] = os.path.splitext(urlparse(url).path)[1].lower() or ".mp3"
-
-        # 💡 [V1.3 移除] 檔案大小攔截封條已移除。現在不管檔案多大，都交由兵牌分流決定！
             
     except Exception as e:
         print(f"📡 [探針失效] 無法預測物資規格: {e}")
@@ -113,12 +150,10 @@ def execute_rss_recon(sb, current_time, session, alarm_callback):
                         wait_days = s.get("wait_days") or 0
                         t2_start = (current_time + timedelta(days=wait_days)).isoformat()
                         
-                        # 💡 [V1.3 智能兵牌] 依照檔案大小進行分流
-                        if meta["size_mb"] and meta["size_mb"] > 50:
-                            assigned = "AUDIO_EAT"
+                        # 💡 [V1.5] 呼叫指揮中心進行兵牌分流
+                        assigned = determine_troop_assignment(meta["size_mb"], wait_days)
+                        if assigned == "AUDIO_EAT":
                             print(f"🚜 [兵牌發配] {s['program_name']} 達 {meta['size_mb']}MB，已打上 AUDIO_EAT 專屬兵牌！")
-                        else:
-                            assigned = "T1" if wait_days > 0 else "T2"
 
                         payload = {
                             "source_name": s["program_name"], "audio_url": audio_url,
@@ -131,7 +166,7 @@ def execute_rss_recon(sb, current_time, session, alarm_callback):
                         db_jitter()
                         sb.table("mission_queue").insert(payload).execute()
                         status_msg = f"✅ 已發送物流" if not meta["skip_reason"] else f"🛑 海關攔截 ({meta['skip_reason']})"
-                        print(f"{status_msg}: {s['program_name']}")
+                        print(f"{status_msg}: {s['program_name']} -> 指派 {assigned}")
 
             db_jitter()
             sb.table("mission_program_master").update({"last_checked_at": current_iso}).eq("podbay_slug", s["podbay_slug"]).execute()
@@ -230,12 +265,10 @@ def execute_html_recon(sb, current_time, session, provider_key, persona_label, a
                     wait_days = master.get("wait_days") if master else 0
                     t2_start = (current_time + timedelta(days=wait_days)).isoformat()
                     
-                    # 💡 [V1.3 智能兵牌] 依照檔案大小進行分流
-                    if meta["size_mb"] and meta["size_mb"] > 50:
-                        assigned = "AUDIO_EAT"
+                    # 💡 [V1.5] 呼叫指揮中心進行兵牌分流
+                    assigned = determine_troop_assignment(meta["size_mb"], wait_days)
+                    if assigned == "AUDIO_EAT":
                         print(f"🚜 [兵牌發配] {source_name} 達 {meta['size_mb']}MB，已打上 AUDIO_EAT 專屬兵牌！")
-                    else:
-                        assigned = "T1" if wait_days > 0 else "T2"
 
                     db_jitter()
                     sb.table("mission_queue").update({
