@@ -94,8 +94,8 @@ def parse_intel_metrics(text):
 
 def call_gemini_summary(secrets, r2_url_path, sys_prompt):
     gem_api_key = secrets.get('GEMINI_API_KEY', secrets.get('GEMINI_KEY'))
-    gemini_models = ["gemini-2.5-flash", "gemini-1.5-flash"]
-    
+    # 🚀 修正 404 錯誤：更新為正確的 Gemini API 模型名稱
+    gemini_models = ["gemini-2.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest"]    
     payload_rest = None; uploaded_file = None; tmp_path = None; use_sdk = False
     
     if not r2_url_path or r2_url_path.lower() == 'null':
