@@ -1,10 +1,20 @@
+
 # ---------------------------------------------------------
+<<<<<<< Updated upstream
 # 程式碼：src/pod_scra_intel_groqcore.py (Groq B計畫防爆模組 V2.3)
 # 任務：處理超長文本的滑動窗口切塊、重疊銜接、防爆休眠與摘要生成
 # 修正：1. 同步使用 Supabase 中央金庫的 GROQ_KEY。
 #       2. [V2.1] 拔除虛假勝利邏輯，遇錯立即拋出異常請求上級換裝。
 #       3. [V2.2] Groq 新增輪詢模型機制
 #       4. [V2.3] 修正變數宣告順序，確保模型降級輪詢正常運作。
+=======
+# 程式碼：src/pod_scra_intel_groqcore.py (Groq B計畫防爆模組 V2.4)
+# 適用部隊：RENDER, KOYEB, ZEABUR (中型機器)
+# 任務：處理超長文本的滑動窗口切塊、重疊銜接、防爆休眠與摘要生成
+# 修正：1. 同步使用 Supabase 中央金庫的 GROQ_KEY。
+#       2. [V2.1] 拔除虛假勝利邏輯，遇錯立即拋出異常請求上級換裝。
+#       3. [V2.4] 新增模型降級輪詢機制，並掛載最新版 Llama 3.1 免費彈匣。
+>>>>>>> Stashed changes
 # ---------------------------------------------------------
 
 import os
@@ -29,11 +39,19 @@ class GroqFallbackAgent:
         self.chunk_size = 15000  
         self.overlap_size = 800  
 
+<<<<<<< Updated upstream
         # 🚀 [V2.2/V2.3] 降級梯隊：優先 70B，若遇限流切換至 8B 或 Mixtral
         self.models_to_try = [
             "llama-3.3-70b-versatile",
             "llama3-8b-8192",
             "mixtral-8x7b-32768"
+=======
+        # 🚀 [V2.4] 降級梯隊：更新為 Groq 最新支援的免費模型
+        self.models_to_try = [
+            "llama-3.3-70b-versatile",                  # 首選：高智商，但每日 Token 消耗快
+            "llama-3.1-8b-instant",                     # 備援 1：新版 8B，速度極快且免費額度高
+            "meta-llama/llama-4-scout-17b-16e-instruct" # 備援 2：最新 Llama 4 模型做最後防線
+>>>>>>> Stashed changes
         ]
 
     def _chunk_text_with_overlap(self, text: str):
@@ -65,7 +83,11 @@ class GroqFallbackAgent:
 
         for idx, chunk_text in enumerate(chunks):
             print(f"🧩 正在呼叫 Groq 處理第 {idx + 1}/{total_chunks} 塊...")
+<<<<<<< Updated upstream
 
+=======
+            
+>>>>>>> Stashed changes
             # 💡 [第一步]：先準備好 System Prompt 與 Messages
             if idx == 0:
                 system_instruction = (
@@ -88,12 +110,20 @@ class GroqFallbackAgent:
             chunk_success = False
             last_error = ""
 
+<<<<<<< Updated upstream
             # 🚀 [第二步]：啟動模型降級輪詢，帶入剛準備好的 messages
+=======
+            # 🚀 [第二步]：啟動模型降級輪詢
+>>>>>>> Stashed changes
             for model_name in self.models_to_try:
                 try:
                     response = self.client.chat.completions.create(
                         model=model_name,
+<<<<<<< Updated upstream
                         messages=messages, # 這裡現在可以正確讀到變數了
+=======
+                        messages=messages,
+>>>>>>> Stashed changes
                         temperature=0.3,
                         max_tokens=2048
                     )
@@ -116,7 +146,11 @@ class GroqFallbackAgent:
 
             # [第三步]：檢查輪詢結果
             if not chunk_success:
+<<<<<<< Updated upstream
                 # 若所有模型都陣亡，拋出例外讓外層捕捉
+=======
+                print(f"❌ [Groq 戰損] 第 {idx + 1} 塊處理失敗，請求上級執行升級備援...")
+>>>>>>> Stashed changes
                 raise Exception(f"所有 Groq 備援模型皆已耗盡額度: {last_error}")
 
             # [第四步]：若不是最後一塊，強制休眠清洗 Token 桶以防 429
