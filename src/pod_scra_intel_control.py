@@ -64,8 +64,8 @@ def get_tactical_panel(worker_id):
         "CAN_COMPRESS": True,
         "COMPRESS_ONLY": False,
         "SCOUT_MODE": False,
-        "MAX_TICKS": 8,               
-        "IDLE_GEARBOX": 4.0,
+        "MAX_TICKS": 4,               
+        "IDLE_GEARBOX": 2.0,
         "GLOBAL_DOMAIN_BLACKLIST": base_blacklist 
     }
 
